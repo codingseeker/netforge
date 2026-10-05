@@ -1,0 +1,8 @@
+name: minimal-lab
+
+scope:
+  network: 10.42.0.0/16
+  namespaces:
+    - client
+    - router
+    - server

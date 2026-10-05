@@ -1,0 +1,9 @@
+name: wrong-type
+
+scope:
+  network: 10.42.0.0/16
+  namespaces: client
+
+limits:
+  max_duration: 10m
+  max_packet_rate: "many"

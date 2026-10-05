@@ -1,0 +1,6 @@
+name: ipv6-cidr
+
+scope:
+  network: fd00:42::/64
+  namespaces:
+    - client

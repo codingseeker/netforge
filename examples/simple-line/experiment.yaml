@@ -1,0 +1,18 @@
+name: simple-line
+
+seed: 20260101
+
+scope:
+  network: 10.42.0.0/16
+  namespaces:
+    - client
+    - router
+    - server
+
+limits:
+  max_namespaces: 4
+  max_interfaces: 8
+  max_duration: 2m
+  max_bandwidth: 200Mbps
+  max_packet_rate: 5000
+  max_concurrent_probes: 10

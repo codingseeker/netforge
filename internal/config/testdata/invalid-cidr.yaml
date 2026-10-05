@@ -1,0 +1,6 @@
+name: invalid-cidr
+
+scope:
+  network: 10.42.0.0/33
+  namespaces:
+    - client

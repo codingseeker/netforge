@@ -1,0 +1,6 @@
+name: host-bits-cidr
+
+scope:
+  network: 10.42.0.5/16
+  namespaces:
+    - client

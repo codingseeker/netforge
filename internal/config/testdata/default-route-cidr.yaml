@@ -1,0 +1,6 @@
+name: default-route-cidr
+
+scope:
+  network: 0.0.0.0/0
+  namespaces:
+    - client

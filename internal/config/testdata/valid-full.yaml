@@ -1,0 +1,21 @@
+name: cascading-failure
+
+seed: 123456
+
+scope:
+  network: 10.42.0.0/16
+  namespaces:
+    - client
+    - router
+    - lb
+    - service-a
+    - service-b
+    - service-c
+
+limits:
+  max_namespaces: 10
+  max_interfaces: 30
+  max_duration: 10m
+  max_bandwidth: 1Gbps
+  max_packet_rate: 100000
+  max_concurrent_probes: 100

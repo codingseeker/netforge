@@ -1,0 +1,49 @@
+# cascading-failure
+#
+# One backend degrades, a balancer in front of the others keeps serving, and the
+# experiment measures the path before and after rather than assuming what the
+# client will see.
+#
+# The plan this document compiles to is printed by:
+#
+#   netforge experiment plan \
+#     --namespace client --target 10.42.0.4 --port 7000 \
+#     examples/cascading-failure/experiment.yaml
+#
+# limits.max_duration is the ceiling the phase describes as `limits.duration`:
+# the schema names every limit for what it bounds, so a duration limit is
+# max_duration.
+
+name: cascading-failure
+
+# The seed makes the experiment repeatable: the same document and the same seed
+# produce the same experiment id, so two runs of this file are recognisably the
+# same experiment in the records.
+seed: 123456
+
+scope:
+  network: 10.42.0.0/16
+  namespaces:
+    - client
+    - router
+    - lb
+    - service-a
+    - service-b
+    - service-c
+
+limits:
+  max_namespaces: 8
+  max_interfaces: 16
+  max_duration: 5m
+  max_bandwidth: 1Gbps
+  max_packet_rate: 100000
+  max_concurrent_probes: 64
+
+# The fault is declared here and injected in the experiment's own FAULT step,
+# between the baseline measurement and the observation. It is not applied when
+# the laboratory is created, because a baseline measured against an already
+# impaired path is not a baseline.
+faults:
+  - target: service-b
+    type: packet_loss
+    value: 10%

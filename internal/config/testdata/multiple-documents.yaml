@@ -1,0 +1,13 @@
+name: first-document
+
+scope:
+  network: 10.42.0.0/16
+  namespaces:
+    - client
+---
+name: second-document
+
+scope:
+  network: 10.43.0.0/16
+  namespaces:
+    - client

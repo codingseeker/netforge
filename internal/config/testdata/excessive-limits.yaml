@@ -1,0 +1,14 @@
+name: excessive-limits
+
+scope:
+  network: 10.42.0.0/16
+  namespaces:
+    - client
+
+limits:
+  max_namespaces: 100000
+  max_interfaces: 100000
+  max_duration: 1000h
+  max_bandwidth: 1000Gbps
+  max_packet_rate: 100000000
+  max_concurrent_probes: 10000000

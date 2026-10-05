@@ -1,0 +1,7 @@
+name: unknown-nested
+
+scope:
+  network: 10.42.0.0/16
+  namespaces:
+    - client
+  gateway: 10.42.0.1

@@ -1,0 +1,68 @@
+name: faults
+seed: 7
+
+scope:
+  network: 10.42.0.0/16
+  namespaces:
+    - nf-client
+    - nf-server
+    - nf-router
+
+limits:
+  max_duration: 5m
+  max_bandwidth: 1Gbps
+
+# A queue discipline is a single root on a device, so one device carries one
+# fault. Each fault below therefore sits on a different end of a different
+# link, which is what an experiment wanting all six effects at once has to do.
+# An inbound fault is applied where the packets leave the far end, so it is
+# named by the namespace that feels it and lands on the other one.
+faults:
+  # A fixed delay on the way out of the client.
+  - target: nf-client
+    interface: nfc0
+    type: latency
+    value: 60ms
+    duration: 1m
+
+  # A delay that varies, on the way out of the server.
+  - target: nf-server
+    interface: nfs0
+    type: jitter
+    value: 30ms
+    delay: 60ms
+    duration: 1m
+
+  # A tenth of the packets dropped, on the way out of the router.
+  - target: nf-router
+    interface: nfc0
+    type: packet_loss
+    value: 10%
+    correlation: 25%
+    duration: 30s
+
+  # A bandwidth ceiling on the client's other link.
+  - target: nf-client
+    interface: nfr0
+    type: bandwidth
+    value: 200kbps
+    duration: 1m
+
+  # Replies the client never asked for, on the router to server link.
+  - target: nf-server
+    interface: nfs0
+    direction: in
+    type: duplication
+    value: 5%
+    duration: 30s
+
+  # Replies that arrive late and out of order, on the client to server link.
+  - target: nf-client
+    interface: nfr0
+    direction: in
+    type: reordering
+    value: 20%
+    delay: 40ms
+    gap: "3"
+    queue: "500"
+    duration: 30s

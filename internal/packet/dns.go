@@ -1,0 +1,390 @@
+package packet
+
+import (
+	"encoding/binary"
+	"net/netip"
+	"strconv"
+	"strings"
+
+	"github.com/netforge/netforge/internal/apperr"
+)
+
+// A minimal DNS codec. NetForge needs exactly one query type and one answer
+// type to measure a resolver, and a full resolver implementation is not what
+// this project is for. Everything here is pure: no sockets, no lookups, and no
+// allocation whose bound comes from the bytes being decoded.
+const (
+	// DNSHeaderSize is the size of a DNS message header.
+	DNSHeaderSize = 12
+	// MaxDNSNameLength is the longest name a message may carry, including the
+	// length octets and the terminating zero.
+	MaxDNSNameLength = 255
+	// MaxDNSLabelLength is the longest single label.
+	MaxDNSLabelLength = 63
+	// MaxDNSQuestionName is the longest name this codec will encode. It is
+	// well inside MaxDNSNameLength so an encoded name can never be refused by
+	// the decoder in the same build.
+	MaxDNSQuestionName = 128
+	// MaxDNSMessageSize is the largest message this codec will build. A name
+	// and a single address record cannot reach it, so it is the protocol
+	// ceiling rather than a limit that is expected to bite.
+	MaxDNSMessageSize = 512
+
+	// DNSTypeA is the address record type.
+	DNSTypeA uint16 = 1
+	// DNSClassIN is the internet class.
+	DNSClassIN uint16 = 1
+)
+
+// DNS message flags and codes.
+const (
+	dnsResponse  uint16 = 1 << 15
+	dnsRecursion uint16 = 1 << 8
+
+	// DNSRCodeSuccess is a successful answer.
+	DNSRCodeSuccess uint16 = 0
+	// DNSRCodeFail means the resolver could not answer.
+	DNSRCodeFail uint16 = 2
+	// DNSRCodeNotFound means the name does not exist.
+	DNSRCodeNotFound uint16 = 3
+	// DNSRCodeRefused means the resolver declined to answer.
+	DNSRCodeRefused uint16 = 5
+)
+
+// DNSQuestion is one question in a DNS message.
+type DNSQuestion struct {
+	Name  string
+	Type  uint16
+	Class uint16
+}
+
+// DNSRecord is one answer in a DNS message. Only address records are decoded,
+// which is the only answer type this codec produces or reads.
+type DNSRecord struct {
+	Name string
+	Type uint16
+	TTL  uint32
+	// Address is the answer for an address record, and the zero address for
+	// any other type, which is reported through Type.
+	Address netip.Addr
+}
+
+// DNSMessage is a decoded DNS message.
+type DNSMessage struct {
+	ID        uint16
+	Response  bool
+	Recursion bool
+	RCode     uint16
+	Questions []DNSQuestion
+	Answers   []DNSRecord
+	// Truncated reports that the message carried the TC bit, which means the
+	// answer did not fit and the sender is asking again over TCP.
+	Truncated bool
+}
+
+// rcodeName describes a response code in words an investigator can use.
+func rcodeName(code uint16) string {
+	switch code {
+	case DNSRCodeSuccess:
+		return "noerror"
+	case DNSRCodeFail:
+		return "servfail"
+	case DNSRCodeNotFound:
+		return "nxdomain"
+	case DNSRCodeRefused:
+		return "refused"
+	default:
+		return "rcode" + strconv.Itoa(int(code))
+	}
+}
+
+// RCodeName returns the name of a DNS response code.
+func RCodeName(code uint16) string { return rcodeName(code) }
+
+// ParseDNS decodes a DNS message. Every length is checked against the bytes
+// that are actually present before anything is read, and a name is followed
+// through at most one pointer, so a message cannot make the decoder loop or
+// allocate.
+func ParseDNS(data []byte) (*DNSMessage, error) {
+	const op = "packet.ParseDNS"
+	if len(data) < DNSHeaderSize {
+		return nil, apperr.InvalidArgument(op, "message is "+strconv.Itoa(len(data))+
+			" bytes, a DNS header needs "+strconv.Itoa(DNSHeaderSize), nil)
+	}
+	message := &DNSMessage{
+		ID:        binary.BigEndian.Uint16(data[0:2]),
+		Recursion: binary.BigEndian.Uint16(data[2:4])&dnsRecursion != 0,
+	}
+	flags := binary.BigEndian.Uint16(data[2:4])
+	if flags&dnsResponse != 0 {
+		message.Response = true
+		message.RCode = flags & 0x000f
+	}
+	counts := [4]int{
+		int(binary.BigEndian.Uint16(data[4:6])),
+		int(binary.BigEndian.Uint16(data[6:8])),
+		int(binary.BigEndian.Uint16(data[8:10])),
+		int(binary.BigEndian.Uint16(data[10:12])),
+	}
+	// Every record costs at least a name and ten bytes of record, so a count
+	// that cannot fit in the message is refused before it is used as a loop
+	// bound.
+	remaining := len(data) - DNSHeaderSize
+	for i, count := range counts {
+		if count > remaining {
+			return nil, apperr.InvalidArgument(op, "the message claims "+strconv.Itoa(count)+
+				" records in section "+strconv.Itoa(i)+" but only "+strconv.Itoa(remaining)+
+				" bytes are present", nil)
+		}
+	}
+
+	offset := DNSHeaderSize
+	for i := 0; i < counts[0]; i++ {
+		name, next, err := parseDNSName(data, offset, 0)
+		if err != nil {
+			return nil, err
+		}
+		if next+4 > len(data) {
+			return nil, apperr.InvalidArgument(op, "the question is cut off", nil)
+		}
+		message.Questions = append(message.Questions, DNSQuestion{
+			Name:  name,
+			Type:  binary.BigEndian.Uint16(data[next : next+2]),
+			Class: binary.BigEndian.Uint16(data[next+2 : next+4]),
+		})
+		offset = next + 4
+	}
+	for i := 0; i < counts[1]; i++ {
+		name, next, err := parseDNSName(data, offset, 0)
+		if err != nil {
+			return nil, err
+		}
+		if next+10 > len(data) {
+			return nil, apperr.InvalidArgument(op, "the answer record is cut off", nil)
+		}
+		record := DNSRecord{
+			Name: name,
+			Type: binary.BigEndian.Uint16(data[next : next+2]),
+			TTL:  binary.BigEndian.Uint32(data[next+4 : next+8]),
+		}
+		rdLength := int(binary.BigEndian.Uint16(data[next+8 : next+10]))
+		rdStart := next + 10
+		if rdStart+rdLength > len(data) {
+			return nil, apperr.InvalidArgument(op, "the answer data is cut off", nil)
+		}
+		if record.Type == DNSTypeA && rdLength == 4 {
+			var octets [4]byte
+			copy(octets[:], data[rdStart:rdStart+4])
+			record.Address = netip.AddrFrom4(octets)
+		}
+		message.Answers = append(message.Answers, record)
+		offset = rdStart + rdLength
+	}
+	return message, nil
+}
+
+// parseDNSName reads a possibly compressed name and returns the offset just
+// past the name in the message. A pointer is followed once, which is all a
+// well formed message needs and all a hostile one is allowed.
+func parseDNSName(data []byte, offset, depth int) (string, int, error) {
+	const op = "packet.parseDNSName"
+	if depth > 1 {
+		return "", 0, apperr.InvalidArgument(op, "the name points at another name", nil)
+	}
+	var labels []string
+	next := -1
+	for {
+		if offset >= len(data) {
+			return "", 0, apperr.InvalidArgument(op, "the name runs past the end of the message", nil)
+		}
+		length := int(data[offset])
+		switch {
+		case length == 0:
+			offset++
+			if next < 0 {
+				next = offset
+			}
+			return strings.Join(labels, "."), next, nil
+		case length&0xc0 == 0xc0:
+			if offset+1 >= len(data) {
+				return "", 0, apperr.InvalidArgument(op, "the name pointer is cut off", nil)
+			}
+			pointer := int(binary.BigEndian.Uint16(data[offset:offset+2]) & 0x3fff)
+			if pointer >= len(data) {
+				return "", 0, apperr.InvalidArgument(op, "the name pointer points outside the message", nil)
+			}
+			if next < 0 {
+				next = offset + 2
+			}
+			suffix, _, err := parseDNSName(data, pointer, depth+1)
+			if err != nil {
+				return "", 0, err
+			}
+			if suffix != "" {
+				labels = append(labels, suffix)
+			}
+			return strings.Join(labels, "."), next, nil
+		case length > MaxDNSLabelLength:
+			return "", 0, apperr.InvalidArgument(op, "a label of "+strconv.Itoa(length)+
+				" bytes is longer than "+strconv.Itoa(MaxDNSLabelLength), nil)
+		default:
+			if offset+1+length > len(data) {
+				return "", 0, apperr.InvalidArgument(op, "a label runs past the end of the message", nil)
+			}
+			labels = append(labels, string(data[offset+1:offset+1+length]))
+			offset += 1 + length
+			if len(labels) > MaxDNSQuestionName/MaxDNSLabelLength+1 {
+				return "", 0, apperr.InvalidArgument(op, "the name has too many labels", nil)
+			}
+		}
+	}
+}
+
+// MarshalQuery encodes a standard recursive query for one name. The name is
+// validated first, so a request that could not be encoded is refused here
+// rather than producing a message that is malformed on the wire.
+func MarshalQuery(id uint16, name string) ([]byte, error) {
+	const op = "packet.MarshalQuery"
+	labels, err := dnsLabels(op, name)
+	if err != nil {
+		return nil, err
+	}
+	total := DNSHeaderSize + len(labels) + 4
+	if total > MaxDNSMessageSize {
+		return nil, messageTooLarge(op, total)
+	}
+	message := make([]byte, DNSHeaderSize, total)
+	binary.BigEndian.PutUint16(message[0:2], id)
+	binary.BigEndian.PutUint16(message[2:4], dnsRecursion)
+	binary.BigEndian.PutUint16(message[4:6], 1)
+	message = append(message, labels...)
+	tail := make([]byte, 4)
+	binary.BigEndian.PutUint16(tail[0:2], DNSTypeA)
+	binary.BigEndian.PutUint16(tail[2:4], DNSClassIN)
+	return append(message, tail...), nil
+}
+
+// MarshalResponse encodes an answer for a query. An empty address encodes a
+// successful message with no answer, which is what a name that does not
+// resolve looks like on the wire.
+func MarshalResponse(request []byte, address netip.Addr, ttl uint32) ([]byte, error) {
+	const op = "packet.MarshalResponse"
+	question, err := ParseDNS(request)
+	if err != nil {
+		return nil, err
+	}
+	if len(question.Questions) == 0 {
+		// A message with no question has nothing to answer, whatever its
+		// response bit says.
+		return nil, apperr.InvalidArgument(op, "the message to answer carries no question", nil)
+	}
+	labels, err := dnsLabels(op, firstOr(question.Questions, DNSQuestion{}).Name)
+	if err != nil {
+		return nil, err
+	}
+	answers := 0
+	if address.IsValid() {
+		answers = 1
+	}
+	total := DNSHeaderSize + len(labels) + 4 + answers*16
+	if total > MaxDNSMessageSize {
+		return nil, messageTooLarge(op, total)
+	}
+	message := make([]byte, DNSHeaderSize, total)
+	binary.BigEndian.PutUint16(message[0:2], question.ID)
+	binary.BigEndian.PutUint16(message[2:4], dnsResponse|dnsRecursion|DNSRCodeSuccess)
+	binary.BigEndian.PutUint16(message[4:6], uint16(len(question.Questions)))
+	binary.BigEndian.PutUint16(message[6:8], uint16(answers))
+	message = append(message, labels...)
+	tail := make([]byte, 4)
+	binary.BigEndian.PutUint16(tail[0:2], DNSTypeA)
+	binary.BigEndian.PutUint16(tail[2:4], DNSClassIN)
+	message = append(message, tail...)
+
+	if answers == 1 {
+		record := make([]byte, 0, 16)
+		// A pointer back to the question name, which is always at offset 12.
+		pointer := make([]byte, 2)
+		binary.BigEndian.PutUint16(pointer, 0xc00c)
+		record = append(record, pointer...)
+		fields := make([]byte, 10)
+		binary.BigEndian.PutUint16(fields[0:2], DNSTypeA)
+		binary.BigEndian.PutUint16(fields[2:4], DNSClassIN)
+		binary.BigEndian.PutUint32(fields[4:8], ttl)
+		binary.BigEndian.PutUint16(fields[8:10], 4)
+		record = append(record, fields...)
+		octets := address.As4()
+		record = append(record, octets[:]...)
+		message = append(message, record...)
+	}
+	return message, nil
+}
+
+// MarshalRefusal encodes a refusal for a query.
+func MarshalRefusal(request []byte) ([]byte, error) {
+	const op = "packet.MarshalRefusal"
+	question, err := ParseDNS(request)
+	if err != nil {
+		return nil, err
+	}
+	if len(question.Questions) == 0 {
+		return nil, apperr.InvalidArgument(op, "the message to refuse carries no question", nil)
+	}
+	labels, err := dnsLabels(op, firstOr(question.Questions, DNSQuestion{}).Name)
+	if err != nil {
+		return nil, err
+	}
+	total := DNSHeaderSize + len(labels) + 4
+	if total > MaxDNSMessageSize {
+		return nil, messageTooLarge(op, total)
+	}
+	message := make([]byte, DNSHeaderSize, total)
+	binary.BigEndian.PutUint16(message[0:2], question.ID)
+	binary.BigEndian.PutUint16(message[2:4], dnsResponse|dnsRecursion|DNSRCodeRefused)
+	binary.BigEndian.PutUint16(message[4:6], uint16(len(question.Questions)))
+	message = append(message, labels...)
+	tail := make([]byte, 4)
+	binary.BigEndian.PutUint16(tail[0:2], DNSTypeA)
+	binary.BigEndian.PutUint16(tail[2:4], DNSClassIN)
+	return append(message, tail...), nil
+}
+
+// messageTooLarge reports a message that would exceed the protocol ceiling.
+// The check itself sits next to each allocation, so a size can never reach a
+// buffer without having been compared against MaxDNSMessageSize first.
+func messageTooLarge(op string, total int) error {
+	return apperr.LimitExceeded(op, strconv.Itoa(total)+
+		" bytes, the maximum message is "+strconv.Itoa(MaxDNSMessageSize), nil)
+}
+
+// dnsLabels encodes a name as length-prefixed labels.
+func dnsLabels(op, name string) ([]byte, error) {
+	name = strings.TrimSuffix(strings.TrimSpace(name), ".")
+	if name == "" {
+		return []byte{0}, nil
+	}
+	if len(name) > MaxDNSQuestionName {
+		return nil, apperr.LimitExceeded(op, "the name is "+strconv.Itoa(len(name))+
+			" bytes, the maximum is "+strconv.Itoa(MaxDNSQuestionName), nil)
+	}
+	encoded := make([]byte, 0, len(name)+2)
+	for _, label := range strings.Split(name, ".") {
+		if label == "" {
+			return nil, apperr.InvalidArgument(op, "the name "+name+" has an empty label", nil)
+		}
+		if len(label) > MaxDNSLabelLength {
+			return nil, apperr.InvalidArgument(op, "the label "+label+" is longer than "+
+				strconv.Itoa(MaxDNSLabelLength)+" bytes", nil)
+		}
+		encoded = append(encoded, byte(len(label)))
+		encoded = append(encoded, label...)
+	}
+	return append(encoded, 0), nil
+}
+
+func firstOr(questions []DNSQuestion, fallback DNSQuestion) DNSQuestion {
+	if len(questions) == 0 {
+		return fallback
+	}
+	return questions[0]
+}

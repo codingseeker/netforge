@@ -1,0 +1,7 @@
+name: invalid-namespace
+
+scope:
+  network: 10.42.0.0/16
+  namespaces:
+    - client
+    - "../../etc/passwd"

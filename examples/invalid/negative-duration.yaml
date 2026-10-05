@@ -1,0 +1,9 @@
+name: negative-duration
+
+scope:
+  network: 10.42.0.0/16
+  namespaces:
+    - client
+
+limits:
+  max_duration: -10m
