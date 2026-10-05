@@ -1,14 +1,3 @@
-// Package security holds the Phase 12 security audit. Every test here runs
-// unprivileged: the audit probes the boundaries that have to hold before a
-// privileged operation is ever offered, so a host that is about to be trusted
-// with laboratories is first made to be safely describable and safely
-// measurable.
-//
-// The audit is deliberately redundant with the unit and integration suites.
-// Its purpose is to be the standing proof that the checklist of Phase 12 is
-// demonstrated: bounded configuration, bounded requests, refusal of excessive
-// resources, refusal of injection payloads, and limits that are checked
-// before they are used.
 package security
 
 import (
@@ -27,9 +16,6 @@ import (
 	"github.com/netforge/netforge/internal/probe"
 )
 
-// auditDocument writes the body and reads it back with the strict decoder the
-// CLI uses, keeping the decoder's own reason so a refusal can be matched to
-// the boundary it hit.
 func auditDocument(t *testing.T, body string) (*config.Config, error) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "audit.yaml")
@@ -60,11 +46,6 @@ func expectAuditRefusal(t *testing.T, name, body string, wantSegment string) {
 	}
 }
 
-// TestMalformedConfigurationIsRefused drives the configuration parser with
-// documents that are not YAML, are YAML of the wrong shape, or carry a field
-// the reader does not know. Every one has to be refused rather than read
-// loosely, because a decoder that tolerates foreign fields is how a hostile
-// document smuggles a value no validation ever sees.
 func TestMalformedConfigurationIsRefused(t *testing.T) {
 	expectAuditRefusal(t, "not yaml", "name: [\n", "decode")
 	expectAuditRefusal(t, "unknown top-level field", "name: x\nsurprise: true\n", "surprise")
@@ -77,11 +58,6 @@ func TestMalformedConfigurationIsRefused(t *testing.T) {
 		"is not one of")
 }
 
-// TestInvalidTargetValuesAreRefused covers the document values that would
-// reach the network layer. A prefix that is not a prefix, a default route as
-// a scope, and a name that a namespace cannot carry have to be refused inside
-// the document, so nothing built from the document ever has to decide what
-// they mean.
 func TestInvalidTargetValuesAreRefused(t *testing.T) {
 	base := "" +
 		"name: x\n" +
@@ -95,18 +71,13 @@ func TestInvalidTargetValuesAreRefused(t *testing.T) {
 		strings.Replace(base, "nf-a", "NF-A", 1), "")
 	expectAuditRefusal(t, "slash namespace",
 		strings.Replace(base, "nf-a", "nf/a", 1), "")
-	// Metacharacter payloads are refused too; the injection test asserts both
-	// refusal and inertness, so the YAML error they cause is a refusal rather
-	// than a finding. The names used here are YAML-valid scalars so the case
-	// survives to the name validator, which is the layer that must refuse.
+
 	expectAuditRefusal(t, "semicolon namespace",
 		strings.Replace(base, "nf-a", "nf-a;rm", 1), "")
 	expectAuditRefusal(t, "metachar namespace",
 		strings.Replace(base, "nf-a", "nf-a$(id)", 1), "")
 }
 
-// TestADefaultRouteIsNotAScope checks the same boundary at the layer that
-// enforces it, where the refusal says exactly what a scope must not be.
 func TestADefaultRouteIsNotAScope(t *testing.T) {
 	_, err := probe.NewScope(netip.MustParsePrefix("0.0.0.0/0"), []string{"nf-audit"})
 	if err == nil {
@@ -117,10 +88,6 @@ func TestADefaultRouteIsNotAScope(t *testing.T) {
 	}
 }
 
-// TestExcessiveResourceRequestsAreRefused inflates one resource ceiling at a
-// time and requires the document to be refused. A configuration file is power
-// of attorney for privileged work, so its claims of budget must be bounded
-// before the code that spends the budget runs.
 func TestExcessiveResourceRequestsAreRefused(t *testing.T) {
 	generous := func(namespaces, maxNS, maxIF, maxDur, maxBW, maxPR, maxCP string) string {
 		return "" +
@@ -133,8 +100,6 @@ func TestExcessiveResourceRequestsAreRefused(t *testing.T) {
 	three := "    - nf-a\n    - nf-b\n    - nf-c\n"
 	valid := func() string { return generous(three, "8", "16", "5m", "1Gbps", "100000", "4") }
 
-	// The ceilings themselves are the first bound: a document may not ask for
-	// more of a resource than the platform will ever grant.
 	expectAuditRefusal(t, "namespaces above the ceiling",
 		generous(three, "4096", "16", "5m", "1Gbps", "100000", "4"), "max_namespaces")
 	expectAuditRefusal(t, "interfaces above the ceiling",
@@ -148,27 +113,15 @@ func TestExcessiveResourceRequestsAreRefused(t *testing.T) {
 	expectAuditRefusal(t, "concurrent probes above the ceiling",
 		generous(three, "8", "16", "5m", "1Gbps", "100000", "99999"), "max_concurrent_probes")
 
-	// The second bound is the document against its own budget: a file may not
-	// grant more namespaces than its own limit allows.
 	many := "    - nf-a\n    - nf-b\n    - nf-c\n    - nf-d\n    - nf-e\n    - nf-f\n    - nf-g\n    - nf-h\n    - nf-i\n"
 	expectAuditRefusal(t, "namespaces beyond its own budget",
 		generous(many, "4", "16", "5m", "1Gbps", "100000", "4"), "exceeds")
 
-	// A sane document still validates, so the refusals above are caused by the
-	// knob being tested and not by the base being broken.
 	if err := validateAudit(t, valid()); err != nil {
 		t.Errorf("the audit's own control document was refused: %v", err)
 	}
 }
 
-// TestCommandInjectionPayloadsAreRefusedOrInert feeds a document the strings
-// an injection attack would try, and requires either that the document refuse
-// them as invalid names or that it accept them as inert data. In neither case
-// may the payload have executed: the marker file a payload would create must
-// not exist, and the parser must have treated the payload as a value rather
-// than as structure. The source half of the test then proves the
-// configuration layer, the one that sees arbitrary payloads, runs no commands
-// at all.
 func TestCommandInjectionPayloadsAreRefusedOrInert(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "netforge-pwned")
 	for name, payload := range map[string]string{
@@ -189,10 +142,6 @@ func TestCommandInjectionPayloadsAreRefusedOrInert(t *testing.T) {
 		}
 	}
 
-	// A comment is inert data: it is kept, and no part of the pipeline may
-	// ever hand it to a shell. The audit accepts a document carrying payloads
-	// in its comment, then enforces through the source scan that the layer
-	// which saw those bytes has no way to execute them.
 	commentary := "" +
 		"# payload: ; rm -rf /; $(id); `echo`; | sh\n" +
 		"name: injected\n" +
@@ -207,8 +156,6 @@ func TestCommandInjectionPayloadsAreRefusedOrInert(t *testing.T) {
 	}
 }
 
-// configProductSources lists the source files of the configuration and name
-// layers, the code that reads arbitrary payloads from disk.
 func configProductSources(t *testing.T) []string {
 	t.Helper()
 	root := filepath.Join("..", "..", "internal")
@@ -223,10 +170,6 @@ func configProductSources(t *testing.T) []string {
 	return files
 }
 
-// TestTheConfigurationLayerRunsNoCommands proves the injection payloads above
-// can never be executed: the layer that parses them imports no process
-// execution machinery at all, so even a payload that passes validation is
-// inert by construction.
 func TestTheConfigurationLayerRunsNoCommands(t *testing.T) {
 	for _, file := range configProductSources(t) {
 		parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly)
@@ -247,9 +190,6 @@ func TestTheConfigurationLayerRunsNoCommands(t *testing.T) {
 	}
 }
 
-// newProbeEngine builds a probe engine for the request-boundary tests. The
-// tests refuse at the request boundary, before a probe opens any socket, so a
-// no-op runner and no echo are enough.
 func newProbeEngine(t *testing.T, limits probe.Limits) *probe.Engine {
 	t.Helper()
 	scope, err := probe.NewScope(netip.MustParsePrefix("10.42.0.0/24"), []string{"nf-audit"})
@@ -269,8 +209,6 @@ func (noopRunner) Run(string, ...string) (stdout, stderr string, code int, err e
 	return "", "", 0, nil
 }
 
-// auditRequest sends one request that the audit expects to be refused, and
-// returns the measured refusal.
 func auditRequest(t *testing.T, request probe.Request) probe.Result {
 	t.Helper()
 	result, err := newProbeEngine(t, probe.DefaultLimits()).Run(context.Background(), request)
@@ -280,9 +218,6 @@ func auditRequest(t *testing.T, request probe.Request) probe.Result {
 	return result
 }
 
-// TestExcessivePacketSizeIsRefused sends a probe whose payload exceeds the
-// largest a measurement may carry. The refusal has to happen before anything
-// is sent, so the check is bounded by a limit rather than by the kernel.
 func TestExcessivePacketSizeIsRefused(t *testing.T) {
 	result := auditRequest(t, probe.Request{
 		Protocol:   probe.ProtocolTCP,
@@ -297,9 +232,6 @@ func TestExcessivePacketSizeIsRefused(t *testing.T) {
 	}
 }
 
-// TestExcessiveProbeTimeoutIsRefused asks a probe for more time than any
-// measurement may take. The requested timeout must be bounded by the limit
-// before a socket is ever opened.
 func TestExcessiveProbeTimeoutIsRefused(t *testing.T) {
 	result := auditRequest(t, probe.Request{
 		Protocol:   probe.ProtocolTCP,
@@ -314,9 +246,6 @@ func TestExcessiveProbeTimeoutIsRefused(t *testing.T) {
 	}
 }
 
-// TestExcessiveConcurrencyIsRefused holds one probe open and asks for a
-// second. The engine admits without waiting, so the second probe is told it
-// cannot run rather than queued behind an unbounded line.
 func TestExcessiveConcurrencyIsRefused(t *testing.T) {
 	scope, err := probe.NewScope(netip.MustParsePrefix("10.42.0.0/24"), []string{"nf-audit"})
 	if err != nil {
@@ -360,7 +289,6 @@ func TestExcessiveConcurrencyIsRefused(t *testing.T) {
 	}
 }
 
-// blockingRunner holds a concurrency slot until its release channel closes.
 type blockingRunner struct {
 	started chan struct{}
 	release chan struct{}

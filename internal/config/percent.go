@@ -9,21 +9,11 @@ import (
 	"github.com/netforge/netforge/internal/apperr"
 )
 
-// Percent is a whole percentage written with a trailing sign, such as "10%".
-//
-// The sign is required on purpose. A fault of "10" and a fault of "10%" are
-// easy to confuse and impossible to tell apart once they are in a record, and a
-// percentage with a fractional part is refused because the kernel takes one
-// anyway. Every number this project accepts in configuration is written the way
-// it is meant to be read, with its unit attached.
 type Percent int
 
 const (
-	// MinPercent is the smallest effect a fault may ask for. A fault that
-	// changes nothing is not a fault, and the kernel accepts a zero loss or
-	// duplication that would quietly do nothing.
 	MinPercent = 1
-	// MaxPercent is the largest effect a fault may ask for.
+
 	MaxPercent = 100
 )
 
@@ -55,8 +45,7 @@ func ParsePercent(raw string) (Percent, error) {
 	if digits == "" {
 		return 0, apperr.InvalidConfig(op, "percentage "+quote(raw)+" has no number in front of the '%'", nil)
 	}
-	// strconv would read a sign, an exponent and an underscore here, none of
-	// which belong in a percentage someone reads by eye.
+
 	for i := 0; i < len(digits); i++ {
 		if digits[i] < '0' || digits[i] > '9' {
 			return 0, apperr.InvalidConfig(op,

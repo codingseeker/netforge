@@ -243,10 +243,6 @@ func FuzzChecksum(f *testing.F) {
 	})
 }
 
-// FuzzRefreshTransportChecksum drives the repair a forwarder performs over
-// arbitrary bytes. The property is the one a router depends on: whatever goes
-// in, the packet that comes out either verifies or is refused, and its length is
-// never anything but what it was.
 func FuzzRefreshTransportChecksum(f *testing.F) {
 	for _, encoded := range []string{udpFrame, tcpSynFrame, icmpEchoFrame, udpZeroChecksumFrame} {
 		f.Add(decodeFuzzSeed(f, encoded))

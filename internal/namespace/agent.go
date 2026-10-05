@@ -17,10 +17,7 @@ import (
 
 const (
 	agentBuffer = 1 << 20
-	// holderBuffer bounds the read on a holder's control pipe. The agent never
-	// writes to it, so anything that arrives is discarded; the bound exists so
-	// that a peer which found the pipe cannot keep a holder reading, because a
-	// holder that never returns is a namespace that is never released.
+
 	holderBuffer = 1 << 16
 )
 
@@ -43,19 +40,6 @@ func Dispatch() (bool, int) {
 	return false, 0
 }
 
-// HolderMain holds a network namespace open for as long as the laboratory agent
-// that created it is alive.
-//
-// The agent holds the write end of a pipe whose read end is this process's
-// standard input. The kernel closes that end when the agent exits, however it
-// exits, so the read below returns and this process leaves. That matters
-// because the kernel destroys a namespace when the last process inside it is
-// gone: a holder that waits only for a signal is an orphan after a run that was
-// killed rather than stopped, and it would hold its namespace, and its veths,
-// open for as long as the machine stayed up.
-//
-// A terminal is not a pipe and is not watched, so a holder started by hand keeps
-// waiting for a signal instead of returning at once.
 func HolderMain() int {
 	end := make(chan struct{})
 	if info, err := os.Stdin.Stat(); err == nil && info.Mode()&(os.ModeNamedPipe|os.ModeSocket) != 0 {
@@ -106,9 +90,7 @@ type daemonProcess struct {
 var (
 	daemonMu sync.Mutex
 	daemons  []*daemonProcess
-	// holders are the control pipes that keep the namespace holders alive. They
-	// are held here rather than in the goroutine that made them so the garbage
-	// collector cannot close a pipe this agent is still relying on.
+
 	holders []*os.File
 )
 
@@ -139,9 +121,7 @@ func stopDaemons() {
 	list := daemons
 	daemons = nil
 	daemonMu.Unlock()
-	// Closing the holders' pipes first is what tells them the laboratory is
-	// over; a holder that exits releases its namespace without waiting for a
-	// signal from a process that is on its way out anyway.
+
 	releasePipes()
 	for _, entry := range list {
 		if entry.feed != nil {
@@ -273,8 +253,7 @@ func spawn(req request) response {
 	}
 	command := exec.Command(self, holderArgv)
 	command.Env = append(os.Environ(), AgentEnv+"=")
-	// The holder watches this pipe rather than waiting for a signal, because a
-	// signal is only ever sent by a process that is still alive to send it.
+
 	command.Stdin = read
 	command.Stdout = nil
 	command.Stderr = nil
@@ -284,8 +263,7 @@ func spawn(req request) response {
 		_ = feed.Close()
 		return response{ID: req.ID, Op: req.Op, Err: err.Error(), Code: -1}
 	}
-	// The holder has its own copy of the read end now. Closing this one is what
-	// lets the holder see the end of the pipe when this agent goes away.
+
 	_ = read.Close()
 	holdPipe(feed)
 	pid := command.Process.Pid

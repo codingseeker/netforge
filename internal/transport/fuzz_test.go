@@ -2,10 +2,6 @@ package transport
 
 import "testing"
 
-// FuzzUnmarshal requires that no datagram, however malformed, can panic the
-// decoder or produce a frame the sender would not have written. The second half
-// matters as much as the first: a frame that decodes but re-encodes differently
-// is a frame two sides of this transport would disagree about.
 func FuzzUnmarshal(f *testing.F) {
 	seeds := [][]byte{
 		nil,
@@ -23,8 +19,7 @@ func FuzzUnmarshal(f *testing.F) {
 	f.Fuzz(func(t *testing.T, datagram []byte) {
 		frame, err := Unmarshal(datagram)
 		if err != nil {
-			// A refused datagram must not have produced anything usable, and
-			// refusing must not have panicked on the way.
+
 			if frame.Payload != nil {
 				t.Fatalf("a refused datagram produced payload %q", frame.Payload)
 			}
@@ -38,8 +33,7 @@ func FuzzUnmarshal(f *testing.F) {
 			t.Fatalf("the decoded payload is %d bytes, want at most %d",
 				len(frame.Payload), MaxPayloadSize)
 		}
-		// Whatever was accepted has to re-encode to something this decoder
-		// accepts again, or the two halves of the transport disagree.
+
 		encoded, err := frame.Marshal()
 		if err != nil {
 			t.Fatalf("an accepted frame did not re-encode: %v", err)
@@ -61,8 +55,6 @@ func FuzzUnmarshal(f *testing.F) {
 	})
 }
 
-// FuzzFrameMarshal requires that no frame a caller can describe is encoded into
-// a buffer larger than the ceiling, whatever the flags and lengths say.
 func FuzzFrameMarshal(f *testing.F) {
 	f.Add(uint8(FlagData), uint32(1), []byte("payload"))
 	f.Add(uint8(FlagAck), uint32(7), []byte(nil))

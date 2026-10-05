@@ -16,17 +16,6 @@ import (
 	"github.com/netforge/netforge/internal/recovery"
 )
 
-// The tests here run the whole of Phase 9 against a real laboratory: real
-// namespaces, a real fault in the kernel, real measurements, and a recovery that
-// is only allowed to do what was authorized. Nothing is stubbed, so what is
-// checked is the claim the phase makes — that an experiment measures a path
-// before and after impairing it, explains what it saw, and verifies what an
-// authorized recovery did.
-
-// The names a laboratory built from a fixed id has. A laboratory's namespaces
-// are generated from its id, so a test that wants to name them in a document
-// before the laboratory exists needs an id it can predict, and phase9LabID is
-// that id.
 const phase9LabID = "nf-phase9"
 
 var (
@@ -36,15 +25,11 @@ var (
 	phase9Address = "10.42.0.6"
 )
 
-// experimentSpec is the laboratory an experiment runs against, with the fault and
-// probe budgets a loss fault needs.
 func experimentSpec() network.Spec {
 	spec := labSpec(phase9LabID)
 	spec.Chaos = chaos.Limits{
 		MaxFaults: 8,
-		// A declared fault lasts as long as the document's limits.max_duration,
-		// because that is the window the document said the experiment had, so the
-		// laboratory has to allow for it.
+
 		MaxDuration:  5 * time.Minute,
 		MaxLatency:   5 * time.Second,
 		MaxBandwidth: 10_000_000,
@@ -53,23 +38,12 @@ func experimentSpec() network.Spec {
 	}
 	spec.Probes = probe.Limits{
 		MaxProbes: 100, MaxRate: 200, MaxSize: 1400,
-		// A loss fault makes a measurement slower than a healthy one, because the
-		// probe waits out its deadline for packets that will never arrive, so the
-		// budget has to cover the impaired path as well.
+
 		MaxDuration: 90 * time.Second, MaxConcurrent: 2,
 	}
 	return granted(spec)
 }
 
-// buildLab creates the laboratory the environment is bound to, and makes sure it
-// is taken apart whatever the experiment does with it.
-//
-// The identifier the environment sets is replaced with one the test can predict,
-// because a laboratory's namespaces are generated from its id and a document has
-// to name those namespaces before the laboratory exists. Everything else about
-// the laboratory is what the environment asked for: the network, the roles, the
-// limits, and the faults, which the environment keeps out of the construction so
-// that the baseline is measured on a healthy path.
 func buildLab(t *testing.T) func(context.Context, network.Spec) (*network.Lab, error) {
 	t.Helper()
 	return func(ctx context.Context, spec network.Spec) (*network.Lab, error) {
@@ -87,8 +61,6 @@ func buildLab(t *testing.T) func(context.Context, network.Spec) (*network.Lab, e
 	}
 }
 
-// observationFor is the observation a phase 9 experiment makes of a laboratory
-// built from a document: from the client namespace, of the server address.
 func observationFor() experiment.Observation {
 	return experiment.Observation{
 		Namespace:  phase9Client,
@@ -105,9 +77,6 @@ func observationFor() experiment.Observation {
 	}
 }
 
-// experimentDocument is a document whose scope grants the namespaces of the
-// laboratory above and which declares the packet loss the experiment injects at
-// the server.
 func experimentDocument(t *testing.T, name string) config.Config {
 	t.Helper()
 	raw := "name: " + name + "\n" +
@@ -115,11 +84,7 @@ func experimentDocument(t *testing.T, name string) config.Config {
 		phase9Router + ", " + phase9Client + ", " + phase9Server + "]\n" +
 		"limits:\n  max_namespaces: 8\n  max_interfaces: 16\n  max_duration: 5m\n" +
 		"  max_bandwidth: 1Gbps\n  max_packet_rate: 100000\n  max_concurrent_probes: 64\n" +
-		// The loss is nine tenths and the observation sends twelve probes, so
-		// that the impaired phase is impaired on every run rather than on most
-		// of them. A test that judges a repair needs an impairment to judge;
-		// five probes against half loss leaves a one in thirty-two chance of
-		// measuring a healthy path and calling the run a success.
+
 		"faults:\n  - target: " + phase9Server + "\n    type: packet_loss\n    value: 90%\n"
 	document, err := config.Parse([]byte(raw))
 	if err != nil {
@@ -128,8 +93,6 @@ func experimentDocument(t *testing.T, name string) config.Config {
 	return *document
 }
 
-// runExperiment compiles a plan from a document and runs it against a real
-// laboratory built from that document's scope.
 func runExperiment(t *testing.T, document config.Config, requests []recovery.Request) (experiment.Report, experiment.LabEnvironment) {
 	t.Helper()
 	plan, err := experiment.Compile(document, observationFor(), requests,
@@ -168,13 +131,8 @@ func TestAnExperimentMeasuresAHealthyPathThenAnImpairedOne(t *testing.T) {
 		t.Errorf("the experiment failed in %q, want the verification to judge the repair", report.Failed)
 	}
 
-	// Every state up to the failure is walked in order, and the cleanup is the
-	// last thing that happens whatever went wrong. A report that stopped early
-	// would leave the operator without the part that says what was measured.
 	want := experiment.States()
-	// Every state up to the failure is walked in order, and the cleanup is the
-	// last thing that happens whatever went wrong. A report that stopped at the
-	// failure would leave out the part that says what was measured.
+
 	failed := -1
 	for i, step := range report.Steps {
 		if step.State == report.Failed {
@@ -198,17 +156,14 @@ func TestAnExperimentMeasuresAHealthyPathThenAnImpairedOne(t *testing.T) {
 		t.Errorf("the run failed in %q, want the verification to be what caught the unrepaired path",
 			report.Failed)
 	}
-	// A healthy path was measured before the fault, so the two measurements can
-	// be compared: that comparison is the point of the experiment.
+
 	if len(report.Baseline) == 0 {
 		t.Fatal("the report holds no baseline measurement")
 	}
 	if len(report.Observed) == 0 {
 		t.Fatal("the report holds no observation")
 	}
-	// The two measurements are compared as loss rather than as reply counts: a
-	// lossy path answers fewer probes but the count depends on how many the probe
-	// managed to send, and the proportion is the part that means something.
+
 	if report.Observed[0].Loss <= report.Baseline[0].Loss {
 		t.Errorf("the impaired path lost %.1f%% of its probes and the healthy one lost %.1f%%, "+
 			"want the fault to show", report.Observed[0].Loss, report.Baseline[0].Loss)
@@ -216,8 +171,7 @@ func TestAnExperimentMeasuresAHealthyPathThenAnImpairedOne(t *testing.T) {
 	if !report.CleanedUp {
 		t.Error("the laboratory was not taken apart after a failed experiment")
 	}
-	// The fault the experiment injected is gone with the laboratory, so a later
-	// test on this host is not measuring a path this one left impaired.
+
 	if lab := environment.Lab(); lab != nil {
 		if remaining := lab.Chaos().List(); len(remaining) != 0 {
 			t.Errorf("the laboratory still holds %d faults after the experiment", len(remaining))
@@ -226,15 +180,9 @@ func TestAnExperimentMeasuresAHealthyPathThenAnImpairedOne(t *testing.T) {
 }
 
 func TestAnExperimentWithoutConsentDiagnosesButDoesNotRepair(t *testing.T) {
-	// The fault is real and the diagnosis is real, but nothing was authorized, so
-	// the recover step does nothing and the verification still fails. A diagnosis
-	// is evidence, not permission.
+
 	report, _ := runExperiment(t, experimentDocument(t, "experiment-unconsented"), nil)
 
-	// How confident the investigator can be about a path losing half its packets
-	// depends on how many of the probes it sent came back, so the classification
-	// is not asserted here. What is asserted is that it classified the path at
-	// all, at the layer the evidence came from, and that it did not act on it.
 	switch report.Diagnosis.Diagnosis {
 	case investigator.Confirmed, investigator.Probable, investigator.Unknown:
 	default:
@@ -249,9 +197,7 @@ func TestAnExperimentWithoutConsentDiagnosesButDoesNotRepair(t *testing.T) {
 	if len(report.Recoveries) != 0 {
 		t.Errorf("the report holds %d recoveries, want none: nothing was authorized", len(report.Recoveries))
 	}
-	// A suggestion is all a diagnosis without consent may produce, and a
-	// suggestion is not a decision: whether one was made depends on the evidence,
-	// but nothing was acted on either way.
+
 	if report.Recommendation.Action != "" {
 		scope, err := recovery.NewScope(report.ExperimentID, "10.42.0.0/24",
 			[]string{phase9Router, phase9Client, phase9Server})
@@ -290,10 +236,6 @@ func TestAnExperimentWithAnAuthorizedRecoveryVerifiesItsRepair(t *testing.T) {
 
 	report, _ := runExperiment(t, document, requests)
 
-	// Whether the repair worked depends on a real fault in a real kernel, so the
-	// assertions are about the shape of the answer rather than the verdict: the
-	// authorized action ran, and it was judged by a measurement rather than
-	// assumed to have worked.
 	if len(report.Recoveries) != 1 {
 		t.Fatalf("the recovery performed %d actions, want the one that was authorized", len(report.Recoveries))
 	}
@@ -322,9 +264,7 @@ func TestAnExperimentWithAnAuthorizedRecoveryVerifiesItsRepair(t *testing.T) {
 
 func TestAnExperimentRefusesToRunWithoutAnObservationItCanMake(t *testing.T) {
 	document := experimentDocument(t, "experiment-unobserved")
-	// A measurement of an address outside the scope must be refused before a
-	// laboratory is built, because building one to measure something the document
-	// does not grant is exactly the side effect a plan exists to avoid.
+
 	observation := observationFor()
 	observation.Target = "10.99.0.3"
 
@@ -340,8 +280,7 @@ func TestAnExperimentRefusesToRunWithoutAnObservationItCanMake(t *testing.T) {
 
 func TestAnExperimentRefusesARequestItWasNotGiven(t *testing.T) {
 	document := experimentDocument(t, "experiment-unrequested")
-	// Consent for one action is not consent for another, and a request for a
-	// namespace the document does not grant is refused whatever was authorized.
+
 	requests := []recovery.Request{{
 		Action:  recovery.ActionRestartService,
 		Target:  phase9Server,
@@ -366,9 +305,6 @@ func TestAnExperimentRefusesARequestItWasNotGiven(t *testing.T) {
 	}
 }
 
-// TestALaboratoryIsBuiltFromTheDocumentScope checks the join the phases depend on:
-// the namespaces a laboratory is created with come from the document, and a
-// document that does not grant them cannot be run.
 func TestALaboratoryIsBuiltFromTheDocumentScope(t *testing.T) {
 	document := experimentDocument(t, "experiment-scope")
 	plan, err := experiment.Compile(document, observationFor(), nil,
@@ -376,8 +312,7 @@ func TestALaboratoryIsBuiltFromTheDocumentScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
-	// Every namespace the plan declares a fault on is a namespace the document
-	// grants, which is what lets the fault be applied at all.
+
 	for _, namespace := range plan.Scope.Namespaces {
 		if namespace == "" {
 			t.Fatal("the plan grants an empty namespace name")

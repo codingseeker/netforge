@@ -12,8 +12,6 @@ import (
 	"github.com/netforge/netforge/internal/apperr"
 )
 
-// fakeRunner answers with a report the caller supplies and records what it was
-// asked to run.
 type fakeRunner struct {
 	mu      sync.Mutex
 	stdout  string
@@ -97,8 +95,7 @@ func TestMeasureReadsWhatCameBack(t *testing.T) {
 }
 
 func TestMeasureAcceptsLossAsAnAnswer(t *testing.T) {
-	// A probe that loses packets exits with status one. That is a result, not
-	// a failure, as long as the report can be read.
+
 	report := `PING 10.42.0.6 (10.42.0.6) 1400(1428) bytes of data.
 
 --- 10.42.0.6 ping statistics ---
@@ -207,8 +204,7 @@ func TestMeasureRefusesATargetThatIsNotAnAddress(t *testing.T) {
 }
 
 func TestMeasureRefusesMoreMeasurementsThanTheLimit(t *testing.T) {
-	// A runner that blocks keeps the slot taken while the second measurement
-	// has to be refused.
+
 	blocking := &fakeRunner{stdout: healthyReport, delay: 50 * time.Millisecond}
 	measurer := newMeasurer(t, Limits{MaxConcurrent: 1}, blocking)
 
@@ -280,8 +276,7 @@ rtt min/avg/max/mdev = 1.001/1.100/1.300/0.100 ms
 	if measurement.Bytes != 10*108 {
 		t.Errorf("got %d bytes, want %d", measurement.Bytes, 10*108)
 	}
-	// The goodput has to follow from the bytes that arrived and the time the
-	// measurement took, not from anything configured.
+
 	expected := float64(measurement.Bytes*8) / measurement.Duration.Seconds()
 	difference := math.Abs(float64(measurement.Goodput)-expected) / expected
 	if difference > 0.2 {
@@ -313,9 +308,6 @@ func TestParseReadsAReportWithoutReplies(t *testing.T) {
 	}
 }
 
-// TestParseReadsTheDuplicateClause uses the report the probe itself produces
-// under a duplication fault, where the extra copies are counted and listed
-// between the received count and the loss.
 func TestParseReadsTheDuplicateClause(t *testing.T) {
 	report := `PING 10.42.0.6 (10.42.0.6) 1400(1428) bytes of data.
 1408 bytes from 10.42.0.6: icmp_seq=1 ttl=63 time=0.104 ms
@@ -335,8 +327,7 @@ rtt min/avg/max/mdev = 0.056/0.086/0.130/0.031 ms, pipe 4
 	if measurement.Duplicates != 2 {
 		t.Errorf("got %d duplicate replies, want 2", measurement.Duplicates)
 	}
-	// A duplicate copy is not a second answer, so the reply count and the
-	// useful payload stay where they were.
+
 	if measurement.Received != 4 || measurement.Sent != 4 {
 		t.Errorf("got %d replies for %d requests, want 4 of 4", measurement.Received, measurement.Sent)
 	}
@@ -345,8 +336,6 @@ rtt min/avg/max/mdev = 0.056/0.086/0.130/0.031 ms, pipe 4
 	}
 }
 
-// TestParseReadsTheReorderEvidence uses the report from under a reordering
-// fault, where the replies come back with their sequence numbers out of order.
 func TestParseReadsTheReorderEvidence(t *testing.T) {
 	report := `PING 10.42.0.6 (10.42.0.6) 1400(1428) bytes of data.
 1408 bytes from 10.42.0.6: icmp_seq=2 ttl=63 time=29.9 ms
@@ -362,16 +351,14 @@ rtt min/avg/max/mdev = 7.87/44.2/80.3/28.6 ms, pipe 4
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	// The replies arrived as 2, 4, 1, 3. The 1 and the 3 both came back after
-	// the 4, which is the reply they overtook.
+
 	if measurement.OutOfOrder != 2 {
 		t.Errorf("got %d out of order replies, want 2", measurement.OutOfOrder)
 	}
 	if measurement.Duplicates != 0 {
 		t.Errorf("got %d duplicates, a reordered report has none", measurement.Duplicates)
 	}
-	// The pipe suffix the probe adds under reordering must not hide the
-	// round trip times.
+
 	if measurement.MinRTT != 7870*time.Microsecond {
 		t.Errorf("got a minimum of %s, want 7.87ms", measurement.MinRTT)
 	}
@@ -425,9 +412,6 @@ func TestLimitsCheck(t *testing.T) {
 	}
 }
 
-// TestParseReadsAnErrorClause uses the report from a path that is broken rather
-// than lossy. Nothing came back, but the report still says exactly what the
-// path did, so it is a measurement and not a parse failure.
 func TestParseReadsAnErrorClause(t *testing.T) {
 	report := `PING 10.42.0.6 (10.42.0.6) 1400(1428) bytes of data.
 From 10.42.0.2 icmp_seq=1 Destination Host Unreachable
@@ -453,8 +437,7 @@ pipe 174
 	if measurement.Replied() {
 		t.Error("a broken path must not report replies")
 	}
-	// Nothing came back, so there is no round trip time and no goodput, and
-	// neither may be invented.
+
 	if measurement.MinRTT != 0 || measurement.Goodput != 0 {
 		t.Errorf("got %s and %d bit/s, want no timing and no goodput", measurement.MinRTT, measurement.Goodput)
 	}

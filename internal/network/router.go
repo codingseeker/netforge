@@ -18,10 +18,7 @@ import (
 const (
 	routerMode  = "netforge-router"
 	routerReady = 3 * time.Second
-	// routerReport is the wait for one round trip of the router's own counters.
-	// It is far longer than starting the router needs, because the router is
-	// busy forwarding while it is asked, and a diagnostic read that gives up
-	// under load reports a laboratory that is fine as one that is broken.
+
 	routerReport  = 20 * time.Second
 	routerStop    = 2 * time.Second
 	routerPoll    = 20 * time.Millisecond
@@ -46,9 +43,7 @@ func (l *Lab) startRouter() error {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	if l.dir == "" {
-		// The router's statistics directory carries an ownership marker for the
-		// same reason the laboratory's does: a run killed with SIGKILL leaves it
-		// behind, and a reconciler may only remove what it can prove it created.
+
 		dir, _, err := reconcile.Create(reconcile.StateRoot(), reconcile.KindRouter, l.spec.ID, time.Now())
 		if err != nil {
 			return fmt.Errorf("%s: %w", op, err)
@@ -118,19 +113,10 @@ func (l *Lab) awaitRouter() error {
 	return fmt.Errorf("%s: the router did not become ready within %s", op, routerReady)
 }
 
-// RouterStats asks the software router for its counters and waits for the
-// answer.
 func (l *Lab) RouterStats() (router.Stats, error) {
 	return l.RouterStatsWithin(routerReport)
 }
 
-// RouterStatsWithin asks the software router for its counters and gives up after
-// the given window.
-//
-// The window is a parameter because two callers want different answers: a test
-// asking about a healthy router will wait, and a run reporting its counters
-// while it takes the laboratory apart will not sit in a diagnostic read longer
-// than the teardown it is part of.
 func (l *Lab) RouterStatsWithin(window time.Duration) (router.Stats, error) {
 	const op = "network.Lab.RouterStats"
 	if window <= 0 {

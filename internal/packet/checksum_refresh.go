@@ -6,27 +6,6 @@ import (
 	"github.com/netforge/netforge/internal/apperr"
 )
 
-// RefreshTransportChecksum recomputes the transport checksum of a packet that is
-// about to be forwarded, in place.
-//
-// The bytes of a received packet may hold only the seed of a checksum its
-// sender never finished. A sender whose network stack offloads the transport
-// sum writes the seed into the checksum field and leaves the rest to the
-// receiving kernel, and a router that reads frames from a packet socket sees
-// those bytes rather than the finished checksum. Forwarding them unchanged hands
-// the far end a packet it will reject as corrupt, and nothing on the wire says
-// why: a refused connection that never answers looks exactly like a path that is
-// down. Recomputing the sum here, over the packet as it will actually be sent,
-// is what makes a forwarded packet a packet.
-//
-// The IPv4 header checksum is not affected. That one is always computed by the
-// sending stack, and a router rewrites it for itself when it changes the time to
-// live.
-//
-// A protocol this layer cannot checksum is left exactly as it arrived rather
-// than guessed at. The bytes go out unchanged, which is what happened before,
-// and the router's own decision to forward an unknown protocol is recorded
-// separately.
 func RefreshTransportChecksum(ip *IPv4) error {
 	const op = "packet.RefreshTransportChecksum"
 	if ip == nil {
@@ -51,9 +30,7 @@ func RefreshTransportChecksum(ip *IPv4) error {
 				"datagram is "+strconv.Itoa(len(ip.Payload))+" bytes, the header needs "+
 					strconv.Itoa(UDPHeaderSize), nil)
 		}
-		// RFC 768 makes a zero checksum mean that the sender omitted it. Turning
-		// an omitted checksum into a computed one would change the datagram
-		// rather than repair it, and the far end accepts both.
+
 		if isZeroChecksum(ip.Payload, UDPChecksumOffset) {
 			return nil
 		}

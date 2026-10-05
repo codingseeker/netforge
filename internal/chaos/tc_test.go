@@ -8,9 +8,6 @@ import (
 	"github.com/netforge/netforge/internal/apperr"
 )
 
-// The kernel reports below were copied from a live laboratory on Linux 6.19
-// with iproute2 6.14, so the parser is tested against the real spelling of the
-// state rather than against an idealised version of it.
 const (
 	kernelNetemDelay = `[{"kind":"netem","handle":"800c:","root":true,"refcnt":13,` +
 		`"options":{"limit":1000,"delay":{"delay":0.05,"jitter":0,"correlation":0},` +
@@ -32,8 +29,6 @@ const (
 		`"options":{"limit":1000,"delay":{"delay":0.02,"jitter":0,"correlation":0},` +
 		`"reorder":{"reorder":0.25,"correlation":0.01},"seed":1,"ecn":false,"gap":3}}]`
 
-	// A token bucket on a device of its own, as the kernel reports it after a
-	// rate limited fault was installed.
 	kernelTBF = `[{"kind":"tbf","handle":"800d:","root":true,"refcnt":13,` +
 		`"options":{"rate":25000,"burst":8192,"lat":1000000}}]`
 
@@ -77,10 +72,7 @@ func TestBuildPlanRendersEveryKind(t *testing.T) {
 			name:     "reordering names the gap after the correlation",
 			wantKind: "netem",
 			params:   Parameters{Reordering: 25, Latency: Duration(20 * time.Millisecond), Correlation: 1, Gap: 3, Queue: 1000},
-			// The kernel reads the gap only after an explicit correlation
-			// argument and only when the gap keyword introduces it. A vector
-			// that passed the gap on its own sets the correlation instead and
-			// the kernel rejects it.
+
 			want: []string{"tc", "qdisc", "replace", "dev", "nfc0", "root", "netem", "limit", "1000",
 				"delay", "20ms", "reorder", "25%", "1%", "gap", "3"},
 		},
@@ -88,8 +80,7 @@ func TestBuildPlanRendersEveryKind(t *testing.T) {
 			name:     "reordering keeps the correlation the caller asked for, which may be none",
 			wantKind: "netem",
 			params:   Parameters{Reordering: 25, Latency: Duration(20 * time.Millisecond), Gap: 3, Queue: 1000},
-			// The kernel accepts a zero correlation, so a fault that did not
-			// ask for one must not gain one on the way to the wire.
+
 			want: []string{"tc", "qdisc", "replace", "dev", "nfc0", "root", "netem", "limit", "1000",
 				"delay", "20ms", "reorder", "25%", "0%", "gap", "3"},
 		},
@@ -317,8 +308,7 @@ func TestVerifyCatchesAKernelThatDisagrees(t *testing.T) {
 }
 
 func TestObserveIgnoresTheKernelSeed(t *testing.T) {
-	// The kernel reports a random 64 bit seed that does not fit in an int64.
-	// Reading the state must not depend on it.
+
 	states, err := parseState(kernelNetemDelay)
 	if err != nil {
 		t.Fatalf("parseState: %v", err)

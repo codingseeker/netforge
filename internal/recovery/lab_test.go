@@ -12,17 +12,6 @@ import (
 	"github.com/netforge/netforge/internal/loadbalancer"
 )
 
-// The tests here join two real pieces: a load balancer that is actually serving,
-// and a recovery that reaches it through the control document it was configured
-// with. Nothing is stubbed between the two, so what is checked is the path an
-// action takes in production, including the part where the action is named as an
-// address with a port and has to be recognised as a backend the balancer already
-// has. The laboratory itself is not here: taking a namespace out for repair is
-// the network package's business and is exercised where those namespaces exist.
-
-// balancerExecutor is a laboratory whose only controllable part is the balancer.
-// The three namespace actions refuse rather than pretend, so a test cannot
-// accidentally pass on an action that was never implemented.
 type balancerExecutor struct {
 	controller *ControlFile
 }
@@ -62,11 +51,6 @@ const (
 	balancerBackend    = "127.0.0.1:7000"
 )
 
-// startBalancer runs a balancer on an unused local port with a control document
-// in a directory the test owns, and with the given backends configured. The
-// backends are not started: whether a configured address is reachable is the
-// balancer's business, and taking one out of service does not require it to have
-// been serving first.
 func startBalancer(t *testing.T, experiment string, backends ...string) (*loadbalancer.Balancer, string) {
 	t.Helper()
 	control := filepath.Join(t.TempDir(), "control.json")
@@ -101,8 +85,6 @@ func startBalancer(t *testing.T, experiment string, backends ...string) (*loadba
 	return balancer, control
 }
 
-// balancerLimits is a healthy balancer's configuration with a health check that
-// answers quickly, so a test does not wait out the production interval.
 func balancerLimits() loadbalancer.Limits {
 	limits := loadbalancer.DefaultLimits()
 	limits.HealthInterval = 100 * time.Millisecond
@@ -132,8 +114,6 @@ func eventually(t *testing.T, what string, check func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-// recoveryFor builds a recovery authorized for the given requests, reaching a
-// balancer through its control document.
 func recoveryFor(t *testing.T, control string, requests ...Request) (*Recovery, balancerExecutor) {
 	t.Helper()
 	scope, err := NewScope(balancerExperiment, balancerNetwork, []string{balancerNamespace})
@@ -144,9 +124,7 @@ func recoveryFor(t *testing.T, control string, requests ...Request) (*Recovery, 
 	if err != nil {
 		t.Fatalf("NewControlFile: %v", err)
 	}
-	// The prober is the one piece faked here. What is under test is the path from
-	// an authorized action to a change in a running balancer; the measurement
-	// that follows an action is checked in the tests that have a laboratory.
+
 	subject, err := New(scope, requests, DefaultCriteria(), DefaultLimits(), time.Now())
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -206,9 +184,7 @@ func TestASecondRemovalOfTheSameBackendIsNotASecondRemoval(t *testing.T) {
 	eventually(t, "the backend to leave service", func() bool {
 		return backendState(balancer, 0) == loadbalancer.StateRemoved
 	})
-	// A second run of the same experiment asks the balancer the same question.
-	// It must be an answer rather than a conflict, because a recovery that is
-	// retried after a failure is ordinary.
+
 	subject, executor = recoveryFor(t, control,
 		consented(ActionRemoveBackend, balancerBackend, balancerNamespace))
 	if _, err := subject.Execute(context.Background(), executor, &fakeProber{measurement: healthy()}); err != nil {
@@ -222,10 +198,7 @@ func TestASecondRemovalOfTheSameBackendIsNotASecondRemoval(t *testing.T) {
 
 func TestABackendTheBalancerDoesNotHaveIsNeverTouched(t *testing.T) {
 	balancer, control := startBalancer(t, balancerExperiment, balancerBackend)
-	// A second address on another port: inside the scope network, so the scope
-	// check passes, but never registered with the balancer. Writing the document
-	// succeeds, because the controller cannot know what the balancer has; the
-	// balancer is the authority on that, and refusing is what it must do.
+
 	subject, executor := recoveryFor(t, control,
 		consented(ActionRemoveBackend, "127.0.0.1:7001", balancerNamespace))
 
@@ -238,8 +211,7 @@ func TestABackendTheBalancerDoesNotHaveIsNeverTouched(t *testing.T) {
 	if state := backendState(balancer, 0); state == loadbalancer.StateRemoved {
 		t.Error("the backend the balancer does have was removed, which is not what the command asked for")
 	}
-	// The refusal says why, so an operator reading the status is not left
-	// guessing whether the command was lost or denied.
+
 	if err := balancer.Status().ControlError; !strings.Contains(err, "may not introduce one") {
 		t.Errorf("the control error is %q, want it to say a control document may not introduce a backend", err)
 	}
@@ -247,8 +219,7 @@ func TestABackendTheBalancerDoesNotHaveIsNeverTouched(t *testing.T) {
 
 func TestAControlFileRefusesAnotherExperimentsDocument(t *testing.T) {
 	_, control := startBalancer(t, balancerExperiment, balancerBackend)
-	// A controller for one run must not write a document another run's balancer
-	// would act on, even when the path is right.
+
 	controller, err := NewControlFile(control, "nf-test-0002")
 	if err != nil {
 		t.Fatalf("NewControlFile: %v", err)
@@ -274,8 +245,7 @@ func TestAControlFileRefusesAMalformedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewControlFile: %v", err)
 	}
-	// A target that is not an endpoint must be refused by the controller rather
-	// than written for the balancer to refuse on its next health tick.
+
 	err = controller.Drain(context.Background(), "not an endpoint")
 	if err == nil {
 		t.Fatal("a drain for something that is not an endpoint was written")

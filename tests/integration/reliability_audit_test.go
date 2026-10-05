@@ -1,14 +1,3 @@
-// The reliability half of the Phase 12 audit. The security audit proves the
-// boundaries before privileged work and the behavioural audit proves what an
-// interruption leaves behind; this file proves the third thing the phase asks
-// for, which is that the same laboratory can be built and torn down again and
-// again without the host drifting.
-//
-// Every check here is a comparison against the host as it was before the
-// laboratory existed, taken over four resources by name. A leak that is only
-// ever reported as "something is left" cannot be told from a leak that was
-// always there, so each resource is asked about separately and the answer is
-// compared with the answer from before.
 package integration
 
 import (
@@ -30,16 +19,11 @@ const (
 	reliabilityRepeat = 4
 )
 
-// staleResource is one kind of object the host could be left carrying. The
-// inspection is asked for by name so a failure says what leaked rather than
-// that something did.
 type staleResource struct {
 	kind   string
 	lookup [][]string
 }
 
-// hostResources are the four things a laboratory can leave behind on a host it
-// was supposed to be invisible to.
 var hostResources = []staleResource{
 	{kind: "namespace", lookup: [][]string{{"ip", "netns", "list"}}},
 	{kind: "interface", lookup: [][]string{{"ip", "-o", "link", "show"}}},
@@ -47,10 +31,6 @@ var hostResources = []staleResource{
 	{kind: "tc rule", lookup: [][]string{{"tc", "qdisc", "show"}, {"tc", "filter", "show", "dev", "lo"}}},
 }
 
-// readResource returns every line the host's own tools report for one kind of
-// object. A tool that will not answer yields nothing: the report is about what
-// the laboratory left, and a host that cannot be asked is not evidence of a
-// leak.
 func readResource(t *testing.T, resource staleResource) []string {
 	t.Helper()
 	var lines []string
@@ -68,8 +48,6 @@ func readResource(t *testing.T, resource staleResource) []string {
 	return lines
 }
 
-// staleAfter reports, for each kind of object, the lines that name the laboratory
-// and were not there before it was built.
 func staleAfter(t *testing.T, before map[string][]string) map[string][]string {
 	t.Helper()
 	var stale map[string][]string
@@ -103,9 +81,6 @@ func snapshotResources(t *testing.T) map[string][]string {
 	return before
 }
 
-// reliabilitySpec is the laboratory each round builds: a client, a router and a
-// server, with a fault to apply and remove and a measurement to take, so that a
-// round exercises the whole lifecycle rather than only the teardown.
 func reliabilitySpec(t *testing.T) network.Spec {
 	t.Helper()
 	plan, err := network.BuildPlan(reliabilityLabID, reliabilityCIDR, 1, 1, 1500)
@@ -130,12 +105,6 @@ func reliabilitySpec(t *testing.T) network.Spec {
 	}
 }
 
-// TestRepeatedBuildAndTeardownLeaveNothingBehind builds the same laboratory
-// several times in a row, measures it, applies a fault, removes the fault and
-// destroys it, and asks the host after every round whether anything carrying the
-// laboratory's identity appeared. The repetition is the point: a teardown that
-// leaks only on the third round, or only when a fault was in place, passes a
-// suite that only runs once.
 func TestRepeatedBuildAndTeardownLeaveNothingBehind(t *testing.T) {
 	hostBefore, err := hostState()
 	if err != nil {
@@ -150,9 +119,7 @@ func TestRepeatedBuildAndTeardownLeaveNothingBehind(t *testing.T) {
 			if err != nil {
 				t.Fatalf("round %d: network.Create: %v", round, err)
 			}
-			// The teardown runs even if a step below fails, and its own failure
-			// is reported: a laboratory left half removed is worse than one that
-			// was never built.
+
 			defer func() {
 				if err := lab.Destroy(context.Background()); err != nil {
 					t.Errorf("round %d: destroy: %v", round, err)
@@ -196,9 +163,6 @@ func TestRepeatedBuildAndTeardownLeaveNothingBehind(t *testing.T) {
 				}
 			}
 
-			// The laboratory is taken apart here rather than in the deferred
-			// call, so the host is asked about it while it is still down and the
-			// deferred call then proves that a second teardown is safe.
 			if err := lab.Destroy(context.Background()); err != nil {
 				t.Fatalf("round %d: destroy: %v", round, err)
 			}
@@ -222,11 +186,6 @@ func TestRepeatedBuildAndTeardownLeaveNothingBehind(t *testing.T) {
 	}
 }
 
-// TestAFailedLaboratoryIsTornDownAsCompletelyAsASuccessfulOne is the other half
-// of repetition: a laboratory that failed part way through must leave the same
-// nothing behind as one that succeeded. A teardown that runs on the happy path
-// and is skipped on the failing one is the leak that a single successful run
-// never shows.
 func TestAFailedLaboratoryIsTornDownAsCompletelyAsASuccessfulOne(t *testing.T) {
 	resourcesBefore := snapshotResources(t)
 
@@ -235,17 +194,15 @@ func TestAFailedLaboratoryIsTornDownAsCompletelyAsASuccessfulOne(t *testing.T) {
 			spec := reliabilitySpec(t)
 			switch round {
 			case 0:
-				// A name the laboratory was not granted: refused at the boundary,
-				// so nothing was created at all.
+
 				spec.Names = []string{"nf-somebody-elses-lab"}
 			case 1:
-				// A budget too small for the laboratory the document describes.
+
 				spec.MaxNames = 2
 			}
 			lab, err := network.Create(context.Background(), spec)
 			if err == nil {
-				// A laboratory that should not have been built must not be left
-				// behind just because it turned out to be buildable.
+
 				if err := lab.Destroy(context.Background()); err != nil {
 					t.Errorf("destroy: %v", err)
 				}
@@ -258,8 +215,6 @@ func TestAFailedLaboratoryIsTornDownAsCompletelyAsASuccessfulOne(t *testing.T) {
 	}
 }
 
-// describe renders a stale-resource report by kind, so a failure names what
-// leaked rather than only that something did.
 func describe(stale map[string][]string) string {
 	var out []string
 	for _, resource := range hostResources {

@@ -19,7 +19,7 @@ func mustQuery(t *testing.T, id uint16, name string) []byte {
 func TestAMarshalledQueryRoundTrips(t *testing.T) {
 	t.Parallel()
 	query := mustQuery(t, 0x1234, "service.lab")
-	// 12 byte header, then the labels, the root label and the question fields.
+
 	if len(query) != DNSHeaderSize+len("service")+1+len("lab")+1+1+4 {
 		t.Errorf("the query is %d bytes, want a single question for service.lab", len(query))
 	}
@@ -97,8 +97,6 @@ func TestAResponseRoundTrips(t *testing.T) {
 	}
 }
 
-// A name that resolves to nothing is a successful message with no answer,
-// which is different from a resolver failure and has to decode differently.
 func TestAResponseWithNoAddressCarriesNoAnswer(t *testing.T) {
 	t.Parallel()
 	answer, err := MarshalResponse(mustQuery(t, 7, "missing.lab"), netip.Addr{}, 30)
@@ -141,7 +139,6 @@ func TestARefusalCarriesItsResponseCode(t *testing.T) {
 	}
 }
 
-// A malformed answer from a peer must be refused rather than guessed at.
 func TestAMalformedAnswerIsRefused(t *testing.T) {
 	t.Parallel()
 	complete := mustQuery(t, 1, "service.lab")
@@ -177,10 +174,6 @@ func TestAMalformedAnswerIsRefused(t *testing.T) {
 	}
 }
 
-// A message that is structurally complete but says nothing is decoded as
-// empty rather than refused: the parser checks that the bytes are a message,
-// and deciding whether an empty message is a useful answer belongs to whoever
-// asked the question.
 func TestAnEmptyMessageDecodesAsEmpty(t *testing.T) {
 	t.Parallel()
 	message, err := ParseDNS(make([]byte, DNSHeaderSize))
@@ -193,11 +186,10 @@ func TestAnEmptyMessageDecodesAsEmpty(t *testing.T) {
 	}
 }
 
-// A message that points at itself must not make the decoder loop.
 func TestASelfReferencingPointerIsRefused(t *testing.T) {
 	t.Parallel()
 	query := mustQuery(t, 1, "service.lab")
-	// Replace the first label length with a pointer to itself.
+
 	query[DNSHeaderSize] = 0xc0
 	query[DNSHeaderSize+1] = 0x0c
 	if _, err := ParseDNS(query); err == nil {
@@ -205,7 +197,6 @@ func TestASelfReferencingPointerIsRefused(t *testing.T) {
 	}
 }
 
-// Answering something that is not a question is refused rather than guessed at.
 func TestAnsweringSomethingThatIsNotAQueryIsRefused(t *testing.T) {
 	t.Parallel()
 	header := make([]byte, DNSHeaderSize)

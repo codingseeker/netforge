@@ -13,23 +13,11 @@ import (
 	"github.com/netforge/netforge/internal/probe"
 )
 
-// The networking checklist is measured against one laboratory rather than
-// against one laboratory per item. A checklist whose items were each proved on
-// a different network proves the items; proving them on the same network proves
-// the network, which is the thing the laboratory exists to provide. Every item
-// below is read from the kernel's own answer or from a probe's own report: a
-// configured value is never the evidence, because a laboratory that reports its
-// own settings would pass this while being broken.
 const (
 	audit12ID   = "nf-ph12-net"
 	audit12CIDR = "10.58.0.0/24"
 )
 
-// audit12Lab builds the single laboratory the checklist runs in: a client, a
-// software router and a server, with the server serving every endpoint the
-// protocol items need. The router is software so that forwarding, routing and
-// address resolution are all done by NetForge rather than by the kernel, which
-// is the only way an item on this checklist can mean anything.
 func audit12Lab(t *testing.T) (*network.Lab, network.Plan) {
 	t.Helper()
 	plan, err := network.BuildPlan(audit12ID, audit12CIDR, 1, 1, 1500)
@@ -82,10 +70,6 @@ func audit12Lab(t *testing.T) (*network.Lab, network.Plan) {
 	return lab, plan
 }
 
-// TestTheNetworkingChecklistIsMeasuredOnOneLaboratory walks every item of the
-// networking checklist against the laboratory audit12Lab builds. The items are
-// the ones the phase names, in its order, and each is asserted from the answer
-// the kernel or the far end gave rather than from what was configured.
 func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 	lab, plan := audit12Lab(t)
 	ctx := context.Background()
@@ -95,11 +79,6 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 	clientAddress := plan.Nodes[0].Address.Addr().String()
 	gateway := plan.Nodes[0].Gateway.String()
 
-	// The router is software, so the first packet of every new flow is dropped
-	// while it resolves the destination's hardware address. That is the
-	// behaviour under test rather than a fault, so the path is warmed once
-	// before anything is measured; measuring across it would compare a cold
-	// router against a warm one and call the difference loss.
 	warm, err := lab.Space(client)
 	if err != nil {
 		t.Fatalf("Space(%s): %v", client, err)
@@ -108,9 +87,6 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 		t.Fatalf("warm the path: %v", err)
 	}
 
-	// The path is measured once, before anything is impaired, and every
-	// impairment below is compared against this same healthy path so that a
-	// difference in the numbers is the fault and not the weather.
 	healthy := measureAt(t, lab, client, server, 20, 50*time.Millisecond)
 	report(t, "checklist baseline", healthy)
 	if healthy.Received != healthy.Sent || healthy.Loss != 0 {
@@ -118,8 +94,7 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 	}
 
 	t.Run("packet forwarding", func(t *testing.T) {
-		// The router is software, so the kernel's own forwarding is off and
-		// anything that arrives was forwarded by NetForge.
+
 		forwarding, err := lab.Forwarding()
 		if err != nil {
 			t.Fatalf("Forwarding: %v", err)
@@ -127,8 +102,7 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 		if forwarding {
 			t.Error("kernel forwarding is on, so the kernel would have forwarded instead of the router")
 		}
-		// One hop and no more: a reply that came back with a decremented time to
-		// live crossed exactly the router and nothing else.
+
 		space, err := lab.Space(client)
 		if err != nil {
 			t.Fatalf("Space(%s): %v", client, err)
@@ -157,9 +131,7 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 	})
 
 	t.Run("routing", func(t *testing.T) {
-		// The kernel is asked which way it would send the packet, and its answer
-		// has to name the router's own interface as the way out. A reconstructed
-		// answer would name the laboratory's plan instead.
+
 		space, err := lab.Space(client)
 		if err != nil {
 			t.Fatalf("Space(%s): %v", client, err)
@@ -175,9 +147,6 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 			t.Errorf("the route to %s names neither the gateway nor this client:\n%s", server, out)
 		}
 
-		// The router keeps its own table, and the longest prefix is the one that
-		// wins. A more specific route is added and has to be the one the kernel
-		// reports for an address inside it.
 		if _, _, err := lab.Send(ctx, plan.Nodes[0].Namespace, "ip", "route", "replace",
 			"10.58.0.128/25", "via", gateway, "dev", plan.Nodes[0].Interface); err != nil {
 			t.Fatalf("add the more specific route: %v", err)
@@ -204,9 +173,7 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 	})
 
 	t.Run("ARP", func(t *testing.T) {
-		// Address resolution is the router's own, so the neighbours it has
-		// learned are the proof that it resolved them rather than guessed, and
-		// its own counters are the proof that it both asked and answered.
+
 		stats, err := lab.RouterStats()
 		if err != nil {
 			t.Fatalf("RouterStats: %v", err)
@@ -221,8 +188,7 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 		if stats.Neighbors == 0 {
 			t.Error("the router holds no neighbours, so it forwarded nothing it had resolved")
 		}
-		// The far end learned the router by answering a request, so its table
-		// holds the router's own address on that link.
+
 		serverSide, err := lab.Space(plan.Nodes[1].Namespace)
 		if err != nil {
 			t.Fatalf("Space(%s): %v", plan.Nodes[1].Namespace, err)
@@ -252,9 +218,6 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 		}
 	})
 
-	// The five application protocols are checked the same way each: a probe
-	// from the client, against a listener the laboratory really started, and a
-	// failure that names itself rather than being reported as a timeout.
 	for _, item := range []struct {
 		name     string
 		protocol probe.Protocol
@@ -298,10 +261,6 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 		})
 	}
 
-	// The four impairments are each injected on top of the healthy path
-	// measured at the top of this test, measured again with the same traffic
-	// pattern, and then removed. A fault that is not removed would make every
-	// item after it a measurement of the fault instead of of the path.
 	for _, item := range []struct {
 		name  string
 		spec  chaos.Spec
@@ -328,8 +287,7 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 			count: 20, slow: 50 * time.Millisecond,
 			spec: chaos.Spec{Kind: chaos.KindLatency, Parameters: chaos.Parameters{Latency: chaos.Duration(60 * time.Millisecond)}},
 			worse: func(before, after probe.Measurement) error {
-				// A fixed delay shows in the fastest reply: the round trip
-				// cannot be quicker than the delay that was added.
+
 				if after.MinRTT < before.MinRTT+50*time.Millisecond {
 					return fmt.Errorf("the fastest reply is %s, the healthy path answered in %s",
 						after.MinRTT, before.MinRTT)
@@ -344,8 +302,7 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 				Latency: chaos.Duration(60 * time.Millisecond), Jitter: chaos.Duration(30 * time.Millisecond),
 			}},
 			worse: func(before, after probe.Measurement) error {
-				// Jitter is a spread, so the slowest reply has to sit well
-				// above the fastest one.
+
 				if spread := after.MaxRTT - after.MinRTT; spread < 10*time.Millisecond {
 					return fmt.Errorf("the replies span only %s, which is not a spread", spread)
 				}
@@ -361,8 +318,7 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 			count: 100, slow: 10 * time.Millisecond,
 			spec: chaos.Spec{Kind: chaos.KindBandwidth, Parameters: chaos.Parameters{Rate: 200_000}},
 			worse: func(before, after probe.Measurement) error {
-				// 1400 byte packets every 10ms offer about 1.1Mbit/s, several
-				// times the ceiling, so the shaper is what limits this.
+
 				if after.Goodput == 0 {
 					return fmt.Errorf("the measurement reports no goodput at all")
 				}
@@ -425,10 +381,6 @@ func TestTheNetworkingChecklistIsMeasuredOnOneLaboratory(t *testing.T) {
 	}
 }
 
-// TestTheLaboratoryTheChecklistUsedIsTakenApart checks that destroying the
-// checklist's laboratory removes it, that destroying it a second time is safe,
-// and that nothing carrying its identity is left on the host. A laboratory that
-// only disappears on its second attempt is one a crash would have left behind.
 func TestTheLaboratoryTheChecklistUsedIsTakenApart(t *testing.T) {
 	before, err := hostState()
 	if err != nil {
@@ -457,10 +409,6 @@ func TestTheLaboratoryTheChecklistUsedIsTakenApart(t *testing.T) {
 	}
 }
 
-// hostLeaksFor lists every host network object carrying one laboratory's
-// identity. Fields the host cannot be asked about are skipped rather than
-// failed: the report is about what the laboratory left behind, and a host that
-// will not answer is not evidence of a leak.
 func hostLeaksFor(id string) (leaks []string) {
 	for _, inspect := range [][]string{
 		{"ip", "-o", "link", "show"},

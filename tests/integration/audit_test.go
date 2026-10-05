@@ -1,10 +1,3 @@
-// Package integration holds the Phase 12 behavioural audit. Where the
-// security audit proves the boundaries before privileged work, this audit
-// proves what happens when a laboratory is under interruption: SIGINT during
-// each phase, a hard kill, and the repeated failures that follow a crash. The
-// measure of every scenario is that the host is left exactly as it was — the
-// same links, the same routes, no namespace, no interface and no tc rule
-// carrying the laboratory's identity.
 package integration
 
 import (
@@ -31,10 +24,6 @@ const (
 	phase12Addr   = "10.42.0.6"
 )
 
-// phase12Document is the audit's laboratory: it grants the identifier above
-// builds, and declares the loss an interrupted experiment is mid-way through
-// pushing. Any laboratory this audit destroys is later rebuilt from the same
-// document, so "the next run recovers" is part of the recovery being tested.
 func phase12Document(t *testing.T, name string) string {
 	t.Helper()
 	return "name: " + name + "\n" +
@@ -57,8 +46,6 @@ func phase12Document(t *testing.T, name string) string {
 		"    value: 90%\n"
 }
 
-// aLongRun asks for enough probes that the phases stay far enough apart for a
-// signal at a chosen offset to land inside the phase this audit is aiming at.
 func aLongRun(t *testing.T, document string) (command *exec.Cmd, out, errOut *bytes.Buffer) {
 	t.Helper()
 	command = exec.Command(binaryPath,
@@ -82,8 +69,6 @@ func aLongRun(t *testing.T, document string) (command *exec.Cmd, out, errOut *by
 	return command, out, errOut
 }
 
-// aQuickRun is the sanity check every scenario ends with: the same laboratory
-// id still builds, runs and tears down after the interruption.
 func aQuickRun(t *testing.T, document string) runResult {
 	t.Helper()
 	return execNetforge(t, "",
@@ -102,10 +87,6 @@ func aQuickRun(t *testing.T, document string) runResult {
 		document)
 }
 
-// hostLeaks returns every network object that still carries the laboratory's
-// identity. Fields the host cannot be asked about are skipped, never failed,
-// because the report is about what the laboratory left behind and a host that
-// will not answer is not evidence of a leak.
 func hostLeaks() (leaks []string) {
 	for _, probe := range [][]string{
 		{"ip", "-o", "link", "show"},
@@ -126,10 +107,6 @@ func hostLeaks() (leaks []string) {
 	return leaks
 }
 
-// interruptExperiment starts the audit's run and sends the signal after the
-// given delay, reporting the exit code the process left with and what it
-// wrote. A signal that arrived after a clean finish is a failure, because the
-// audit is only evidence when the signal actually landed in the run.
 func interruptExperiment(t *testing.T, command *exec.Cmd, delay time.Duration, signal syscall.Signal) (exitCode int, stdout, stderr string) {
 	t.Helper()
 	if err := command.Start(); err != nil {
@@ -156,15 +133,6 @@ func interruptExperiment(t *testing.T, command *exec.Cmd, delay time.Duration, s
 	return exitCode, stdout, stderr
 }
 
-// labProcesses returns every NetForge laboratory process the host is still
-// running, as "pid kind" strings.
-//
-// A laboratory's namespaces are not in `ip netns list`: NetForge creates them
-// with clone and addresses them by PID, so the only place a surviving namespace
-// is visible is the process holding it open. A host with no leftover link,
-// route, namespace or qdisc can still be running a laboratory's worth of
-// namespaces, which is why the audit asks the process table as well as the
-// network tools.
 func labProcesses() []string {
 	var found []string
 	entries, err := os.ReadDir("/proc")
@@ -185,8 +153,7 @@ func labProcesses() []string {
 		}
 		raw, err := os.ReadFile(filepath.Join("/proc", pid, "cmdline"))
 		if err != nil {
-			// The process ended between the read of the directory and this read,
-			// which is the outcome the audit wants rather than a failure.
+
 			continue
 		}
 		for _, arg := range strings.Split(string(raw), "\x00") {
@@ -200,19 +167,13 @@ func labProcesses() []string {
 	return found
 }
 
-// assertNoLaboratoryProcesses demands that every laboratory process that was
-// not running before the scenario has exited. A holder that outlives the run
-// that created it is holding a network namespace, and its veths, open for as
-// long as the machine stays up.
 func assertNoLaboratoryProcesses(t *testing.T, label string, before []string) {
 	t.Helper()
 	existing := make(map[string]bool, len(before))
 	for _, entry := range before {
 		existing[entry] = true
 	}
-	// The processes are told to stop by a pipe closing rather than by a signal
-	// being delivered, so give the kernel the moment it needs before declaring
-	// one still alive.
+
 	var leftover []string
 	for attempt := 0; attempt < 50; attempt++ {
 		leftover = nil
@@ -230,9 +191,6 @@ func assertNoLaboratoryProcesses(t *testing.T, label string, before []string) {
 		label, len(leftover), strings.Join(leftover, ", "))
 }
 
-// assertHostCameBack compares the visible host against the snapshot taken
-// before the laboratory existed and demands that nothing carrying the
-// laboratory's identity survives anywhere.
 func assertHostCameBack(t *testing.T, label string, before hostSnapshot) {
 	t.Helper()
 	after, err := hostState()
@@ -247,13 +205,6 @@ func assertHostCameBack(t *testing.T, label string, before hostSnapshot) {
 	}
 }
 
-// TestSIGINTInEveryPhaseLeavesTheLaboratoryClean sends SIGINT at a spread of
-// moments inside one run: during setup, while the fault is injected and being
-// observed, in the recovery, and in the verification. Every interrupted run
-// has to come back to the host exactly as it found it, and the same
-// laboratory id has to build, run and tear down afterwards. The interrupted
-// run's own report carries its cancellation, so the cleanup is not inferred
-// from an exit code alone.
 func TestSIGINTInEveryPhaseLeavesTheLaboratoryClean(t *testing.T) {
 	offsets := []struct {
 		when  string
@@ -282,8 +233,6 @@ func TestSIGINTInEveryPhaseLeavesTheLaboratoryClean(t *testing.T) {
 		_ = stdout
 		_ = stderr
 
-		// The laboratory that was interrupted must be recoverable by name:
-		// the next run with the same id succeeds and cleans itself up.
 		again := aQuickRun(t, document)
 		if again.exitCode != 0 || !strings.Contains(again.stdout, `"succeeded": true`) {
 			t.Errorf("%s: a run after the interruption failed: exit %d\n%s",
@@ -294,11 +243,6 @@ func TestSIGINTInEveryPhaseLeavesTheLaboratoryClean(t *testing.T) {
 	assertNoLaboratoryProcesses(t, "after four interruptions", beforeProcesses)
 }
 
-// TestAKilledExperimentIsRecoveredByTheNextRun kills the experiment hard,
-// while the fault is live and again deeper in the run. Nothing can run when
-// SIGKILL lands, so the recovery the audit demands is the next run: it has to
-// take the laboratory's identity, build the same laboratory, measure, finish
-// and leave the host exactly as it was found.
 func TestAKilledExperimentIsRecoveredByTheNextRun(t *testing.T) {
 	document := writeFile(t, "phase12-kill.yaml", phase12Document(t, "phase12-kill"))
 	before, err := hostState()
@@ -308,9 +252,9 @@ func TestAKilledExperimentIsRecoveredByTheNextRun(t *testing.T) {
 	beforeProcesses := labProcesses()
 
 	for _, after := range []time.Duration{
-		400 * time.Millisecond,  // the fault is being injected
-		1800 * time.Millisecond, // the observation is running
-		3200 * time.Millisecond, // the recovery is underway
+		400 * time.Millisecond,
+		1800 * time.Millisecond,
+		3200 * time.Millisecond,
 	} {
 		command, _, _ := aLongRun(t, document)
 		if err := command.Start(); err != nil {
@@ -333,10 +277,6 @@ func TestAKilledExperimentIsRecoveredByTheNextRun(t *testing.T) {
 	assertNoLaboratoryProcesses(t, "after three kills", beforeProcesses)
 }
 
-// TestRepeatedFailuresDoNotAccumulateState runs the audit's destructive
-// scenario a second time to be sure the recovery leaves no margin of stale
-// state that accumulates run over run: the host after two rounds of
-// interruption is still the host before either round began.
 func TestRepeatedFailuresDoNotAccumulateState(t *testing.T) {
 	document := writeFile(t, "phase12-repeat.yaml", phase12Document(t, "phase12-repeat"))
 	before, err := hostState()

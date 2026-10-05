@@ -21,14 +21,6 @@ import (
 	"github.com/netforge/netforge/internal/report"
 )
 
-// The experiment commands differ in what they do to the host. `experiment plan`
-// compiles a document into the lifecycle that would be walked and prints it, and
-// `recovery actions` prints the closed set of actions a recovery may perform;
-// neither creates a namespace, opens a socket or reads a control document, so
-// both can be run by anyone who can read a configuration file. `experiment run`
-// is the opposite: it builds a real laboratory, impairs it, measures it and takes
-// it apart, and it is the only command here that does.
-
 type experimentOptions struct {
 	namespace  string
 	target     string
@@ -47,15 +39,12 @@ type experimentOptions struct {
 	clients    int
 	servers    int
 	id         string
-	// routing chooses who forwards a packet in the router namespace, servicePorts
-	// asks for as many server namespaces to serve an endpoint as the observation
-	// needs, and serviceBasePort is the first of the ports they take.
+
 	routing         string
 	servicePorts    uint
 	serviceBasePort uint
 }
 
-// stringList collects a flag that may be given more than once.
 type stringList []string
 
 func (l *stringList) String() string { return strings.Join(*l, ",") }
@@ -65,8 +54,6 @@ func (l *stringList) Set(value string) error {
 	return nil
 }
 
-// experimentFlags registers the flags the plan and run subcommands share: the
-// observation, the recovery actions, and the explicit consent a recovery needs.
 func experimentFlags(fs *flag.FlagSet, opts *experimentOptions) {
 	fs.StringVar(&opts.namespace, "namespace", "", "laboratory namespace the experiment measures from")
 	fs.StringVar(&opts.target, "target", "", "address the experiment observes")
@@ -141,8 +128,7 @@ func experimentPlan() *Command {
 			if err != nil {
 				return err
 			}
-			// Compiling is the whole command. It has no side effects, so a
-			// refusal here means nothing was created and nothing was touched.
+
 			plan, err := experiment.Compile(*document, observation, requests,
 				recovery.DefaultCriteria(), experiment.DefaultLimits(), time.Now())
 			if err != nil {
@@ -168,8 +154,6 @@ func experimentPlan() *Command {
 	}
 }
 
-// experimentRun runs the experiment a document describes, against a real
-// laboratory, and reports what it measured.
 func experimentRun() *Command {
 	return &Command{
 		Name:    "run",
@@ -208,10 +192,7 @@ func experimentRun() *Command {
 				opts.servers = 1
 				opts.routing = "kernel"
 			}
-			// The run's own flags are checked before the document is compiled,
-			// because a flag that names a mode the router does not implement is
-			// wrong in the same way whether or not the document is: it would
-			// otherwise be reported as a problem with the document.
+
 			if err := opts.checkRunFlags(); err != nil {
 				return err
 			}
@@ -223,10 +204,7 @@ func experimentRun() *Command {
 			if err != nil {
 				return err
 			}
-			// Compiling is where everything is checked: the document, the
-			// observation against the scope, and the consent of every recovery
-			// action. A refusal here happens before the laboratory exists, which
-			// is the point of compiling before running.
+
 			plan, err := experiment.Compile(*document, observation, requests,
 				recovery.DefaultCriteria(), experiment.DefaultLimits(), time.Now())
 			if err != nil {
@@ -246,11 +224,6 @@ func experimentRun() *Command {
 			}
 			run, _ := controller.Run(ctx)
 
-			// The report is written whether the run finished or failed, because
-			// a failed run is exactly the run a report is kept for. It carries
-			// what the run built, recorded while the laboratory existed. The log
-			// line says what happened without repeating the measurements, so a
-			// reader has the log for the timeline and the report for the numbers.
 			reportErr := opts.writeReport(session.Env.stdout(), run, environment.Summary())
 			logger := session.Logger.With(slog.String(logging.FieldExperimentID, run.ExperimentID))
 			if run.Succeeded() {
@@ -272,14 +245,6 @@ func experimentRun() *Command {
 	}
 }
 
-// checkRunFlags validates the flags a run carries that are wrong on their own,
-// before the document is compiled and long before a namespace exists.
-//
-// The flags that need the document or the observation to be judged — the service
-// ports, which have to answer the port being measured — are checked in labSpec,
-// which is still before anything exists. Splitting them this way is deliberate:
-// a document with three problems and a flag with one should say four things, and
-// a refusal about the observation should not mask a refusal about the document.
 func (o *experimentOptions) checkRunFlags() error {
 	if err := o.checkOutput(); err != nil {
 		return err
@@ -288,14 +253,6 @@ func (o *experimentOptions) checkRunFlags() error {
 	return err
 }
 
-// routingMode translates the routing flag into the mode the laboratory is built
-// with.
-//
-// It is refused rather than defaulted. A silently ignored "-routing software"
-// would produce a report describing a laboratory whose packets the kernel
-// forwarded, which is the same class of defect as a report claiming a checksum
-// the router never recomputed: the run would look like it measured the software
-// router and would have measured the kernel.
 func (o *experimentOptions) routingMode() (network.Routing, error) {
 	const op = "cli.experiment.run"
 	switch strings.ToLower(strings.TrimSpace(o.routing)) {
@@ -308,13 +265,6 @@ func (o *experimentOptions) routingMode() (network.Routing, error) {
 		"-routing "+quote(o.routing)+" is not a mode this build forwards with, want kernel or software", nil)
 }
 
-// serviceRange decides which ports the requested services bind: how many, and
-// from which port.
-//
-// The count and the base port are separate flags rather than a list because a
-// list could name the same port twice, and a laboratory that asked two
-// namespaces to bind one port would fail at the moment it was created rather
-// than at the moment it was asked for.
 func (o *experimentOptions) serviceRange() (count int, base uint16, err error) {
 	const op = "cli.experiment.run"
 	protocol := probe.Protocol(strings.ToLower(strings.TrimSpace(o.protocol)))
@@ -346,8 +296,7 @@ func (o *experimentOptions) serviceRange() (count int, base uint16, err error) {
 	}
 	base64 := uint64(o.serviceBasePort)
 	if base64 == 0 {
-		// The base port defaults to the port the observation measures, because a
-		// service on any other port would not answer it.
+
 		base64 = uint64(o.port)
 		if base64 == 0 {
 			return 0, 0, apperr.Validation(op, "a service needs a port to bind: -port is 0 and "+
@@ -369,16 +318,8 @@ func (o *experimentOptions) serviceRange() (count int, base uint16, err error) {
 	return count, uint16(base64), nil
 }
 
-// maxPort is the last port a service can bind.
 const maxPort = 65535
 
-// serviceSpecs builds one service per requested server, refusing an observation
-// that nothing in the laboratory would answer.
-//
-// The namespaces come from the plan the laboratory will be built from, so what is
-// named here is what will exist. That is what makes the refusal possible without
-// creating anything: an observation of a server this run is not serving from is
-// known to have no listener before a single namespace exists.
 func (o *experimentOptions) serviceSpecs(cidr string) ([]network.ServiceSpec, error) {
 	const op = "cli.experiment.run"
 	count, base, err := o.serviceRange()
@@ -413,12 +354,6 @@ func (o *experimentOptions) serviceSpecs(cidr string) ([]network.ServiceSpec, er
 	return out, nil
 }
 
-// checkAnswered refuses an observation of a protocol that needs a listener when
-// the run does not serve the address being observed.
-//
-// Without this a run would bind the listener on one server and measure another,
-// and the measurement would be of a closed port: the run would succeed and mean
-// nothing.
 func (o *experimentOptions) checkAnswered(specs []network.ServiceSpec, servers []network.Node) error {
 	const op = "cli.experiment.run"
 	protocol := probe.Protocol(strings.ToLower(strings.TrimSpace(o.protocol)))
@@ -441,8 +376,6 @@ func (o *experimentOptions) checkAnswered(specs []network.ServiceSpec, servers [
 		", so a "+string(protocol)+" probe of it would be answered by nothing", nil)
 }
 
-// labIdentifier is the identifier the laboratory will be built under, which is
-// what its namespaces are named from.
 func (o *experimentOptions) labIdentifier() string {
 	if o.id != "" {
 		return o.id
@@ -450,8 +383,6 @@ func (o *experimentOptions) labIdentifier() string {
 	return "unidentified"
 }
 
-// maxInt returns the larger of two counts, so a plan built from flags that have
-// not been checked yet still has a client to name.
 func maxInt(value, floor int) int {
 	if value > floor {
 		return value
@@ -459,7 +390,6 @@ func maxInt(value, floor int) int {
 	return floor
 }
 
-// kindOf reports the kind of an error so a wrapped error keeps it.
 func kindOf(err error) apperr.Kind {
 	if kind, ok := apperr.KindOf(err); ok {
 		return kind
@@ -467,7 +397,6 @@ func kindOf(err error) apperr.Kind {
 	return apperr.KindInternal
 }
 
-// checkOutput refuses a report format the command does not know.
 func (o *experimentOptions) checkOutput() error {
 	switch o.output {
 	case "text", "json":
@@ -477,7 +406,6 @@ func (o *experimentOptions) checkOutput() error {
 		"-output "+quote(o.output)+" is not supported, want text or json", nil)
 }
 
-// writeReport writes the run in the format the operator asked for.
 func (o *experimentOptions) writeReport(w io.Writer, run experiment.Report, laboratory *network.Summary) error {
 	if o.output == "json" {
 		return report.EncodeJSON(w, run, laboratory)
@@ -485,10 +413,6 @@ func (o *experimentOptions) writeReport(w io.Writer, run experiment.Report, labo
 	return report.EncodeText(w, run, laboratory)
 }
 
-// labSpec is the laboratory built for a document. The limits come from the
-// document, so a laboratory never allows more than its own document grants,
-// and the faults the engine will be asked for are within the same bounds the
-// document already validated them against.
 func (o *experimentOptions) labSpec(document config.Config, experimentID string) (network.Spec, error) {
 	const op = "cli.experiment.run"
 	if o.clients < 1 || o.servers < 1 {
@@ -509,23 +433,13 @@ func (o *experimentOptions) labSpec(document config.Config, experimentID string)
 		Servers: o.servers,
 		MTU:     1500,
 		Names:   document.Scope.Namespaces,
-		// The namespaces a laboratory is created with are generated from its
-		// identifier, so the identifier has to be one the document's scope
-		// already grants. The operator chooses it, as the entry to the
-		// laboratory the document describes; when none is chosen the
-		// environment derives one from the plan, and the document has to grant
-		// the namespaces that identifier produces.
+
 		ID:       o.id,
 		MaxNames: document.Limits.MaxNamespaces,
 		MaxIfs:   document.Limits.MaxInterfaces,
-		// Who forwards is the operator's choice, and it is carried in the
-		// specification rather than left to the laboratory's default: a run that
-		// asked for the software router and got the kernel would report
-		// forwarded bytes it did not forward.
+
 		Routing: routing,
-		// The fault engine gets the same bounds the document validated its
-		// faults against, so a fault the document accepted is never refused at
-		// the moment it would take effect.
+
 		Chaos: chaos.Limits{
 			MaxFaults:    chaos.CeilingFaults,
 			MaxDuration:  document.Limits.MaxDuration.Duration(),
@@ -534,19 +448,13 @@ func (o *experimentOptions) labSpec(document config.Config, experimentID string)
 			MaxQueue:     chaos.CeilingQueue,
 			MaxGap:       chaos.CeilingGap,
 		},
-		// A measurement may take as long as the longest step the experiment
-		// allows, so a path that loses everything can still be measured rather
-		// than refused by its own budget.
+
 		Probes: probe.Limits{
 			MaxDuration:   experiment.DefaultLimits().MaxStep,
 			MaxConcurrent: 2,
 		},
 	}
-	// The identifier is settled here rather than inside the laboratory, because
-	// the services are built from the plan this identifier produces: the
-	// namespaces a service is asked to serve from have to be the namespaces the
-	// laboratory will create. Building a plan costs nothing and touches nothing,
-	// so every refusal here still happens before anything exists.
+
 	if spec.ID == "" {
 		spec.ID = experimentID
 	}
@@ -557,14 +465,10 @@ func (o *experimentOptions) labSpec(document config.Config, experimentID string)
 	return spec, nil
 }
 
-// buildLaboratory creates the laboratory a run lives in.
 func buildLaboratory(ctx context.Context, spec network.Spec) (*network.Lab, error) {
 	return network.Create(ctx, spec)
 }
 
-// observation builds the observation from the flags. The namespace and target
-// are required here rather than defaulted, because an experiment that measured
-// something nobody named is not an experiment anybody can check.
 func (o *experimentOptions) observation() (experiment.Observation, error) {
 	protocol := probe.Protocol(strings.ToLower(strings.TrimSpace(o.protocol)))
 	if !protocol.Valid() {
@@ -600,12 +504,6 @@ func (o *experimentOptions) observation() (experiment.Observation, error) {
 	}, nil
 }
 
-// requests builds the recovery requests from the flags.
-//
-// -authorize is required before any -recover is acted on. Naming an action is
-// not consent: without the flag the requests are still built and still handed to
-// the compiler, and the compiler refuses them, so the refusal a user sees is the
-// real one rather than a message written for this command.
 func (o *experimentOptions) requests() ([]recovery.Request, error) {
 	out := make([]recovery.Request, 0, len(o.recover))
 	for _, entry := range o.recover {
@@ -676,10 +574,6 @@ func recoveryActions() *Command {
 	}
 }
 
-// actionTarget describes what an action is aimed at, in the form the action is
-// named in. A backend action takes an address and a port, a route action takes a
-// destination, and a namespace action takes a namespace; the scope is what these
-// forms are checked against.
 func actionTarget(action recovery.Action) string {
 	switch action {
 	case recovery.ActionRemoveBackend, recovery.ActionRestoreBackend,

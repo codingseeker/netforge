@@ -1,17 +1,3 @@
-// Package reconcile finds and reclaims the state a killed NetForge run leaves
-// behind.
-//
-// A run that finishes, or is interrupted, takes its state directory with it. A
-// run killed with SIGKILL cannot: it releases its namespaces, because each
-// namespace holder is tied to a pipe the agent holds, but the directory holding
-// its service status files and its router's statistics survives. This package is
-// how an operator finds that directory and takes it back.
-//
-// The whole of its safety argument is in the ownership check. The state root is
-// shared — it is the system temporary directory — so nothing here removes
-// anything it cannot prove is NetForge's own, and the proof is a marker NetForge
-// wrote inside the directory when it created it. A directory without a valid
-// marker is listed and left alone; it is never a candidate.
 package reconcile
 
 import (
@@ -31,35 +17,20 @@ import (
 	"github.com/netforge/netforge/internal/namespace"
 )
 
-// Kind is what a state directory is for. It is the first thing a reader needs,
-// because the state root is shared and a directory named netforge-router-… is
-// not a laboratory and one named netforge-lab-… is not a router's counters.
 type Kind string
 
 const (
-	// KindLaboratory is a laboratory's state directory: the service status files
-	// its services report into.
 	KindLaboratory Kind = "laboratory"
-	// KindRouter is the software router's state directory: the statistics file
-	// it refreshes on SIGUSR1.
+
 	KindRouter Kind = "router"
 )
 
-// MarkerFile is the name of the ownership marker inside a state directory.
 const MarkerFile = "netforge-state.json"
 
-// MarkerVersion is the marker format this build reads and writes. A marker that
-// names another version is not this build's marker, and a directory whose marker
-// names another version is not positively identified.
 const MarkerVersion = 1
 
-// nameBytes is how much randomness a generated directory name carries. Twelve
-// hexadecimal characters is enough that two laboratories on one host do not
-// collide, and short enough to read in a listing.
 const nameBytes = 6
 
-// KindOf reports the kind a generated directory name declares, and whether the
-// name is one NetForge could have generated at all.
 func KindOf(name string) (Kind, bool) {
 	for _, kind := range Kinds() {
 		if generatedName(kind, name) {
@@ -69,12 +40,8 @@ func KindOf(name string) (Kind, bool) {
 	return "", false
 }
 
-// Kinds lists the kinds this build knows. A marker naming a kind that is not in
-// this list is not positively identified: a future NetForge could write kinds
-// this one would remove without understanding.
 func Kinds() []Kind { return []Kind{KindLaboratory, KindRouter} }
 
-// prefix returns the name prefix a kind's directories are generated with.
 func prefix(kind Kind) string {
 	switch kind {
 	case KindLaboratory:
@@ -86,11 +53,6 @@ func prefix(kind Kind) string {
 	}
 }
 
-// generatedName reports whether name is one this build generates for a kind:
-// the kind's prefix followed by a suffix that passes the same name validation a
-// namespace does. It is the first half of the ownership argument, and it costs
-// no filesystem call, which is why a name that fails it is refused before
-// anything is read or removed.
 func generatedName(kind Kind, name string) bool {
 	if prefix(kind) == "" || !strings.HasPrefix(name, prefix(kind)) {
 		return false
@@ -101,34 +63,20 @@ func generatedName(kind Kind, name string) bool {
 	return len(name) > len(prefix(kind))
 }
 
-// Marker is the proof that a directory is NetForge's.
-//
-// It is written once, when the directory is created, and it is written whole or
-// not at all: a half-written marker is a marker that cannot be trusted, and an
-// untrusted marker is not ownership.
 type Marker struct {
-	// Version is the marker format this file was written in.
 	Version int `json:"version"`
-	// Kind is what the directory is for.
+
 	Kind Kind `json:"kind"`
-	// ID is the identifier of the laboratory that owns the directory, or the
-	// laboratory it was serving.
+
 	ID string `json:"id"`
-	// Name is the directory's own name. It is carried in the marker as well as
-	// derived from the path, because a marker that names one directory while
-	// sitting in another has been copied, and a copy is not ownership.
+
 	Name string `json:"name"`
-	// OwnerPID is the process that created the directory. A directory whose owner
-	// is still running is in use, and is never removed.
+
 	OwnerPID int `json:"owner_pid"`
-	// CreatedAt is when the directory was created, which is what an age is
-	// measured against.
+
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// StateRoot returns the directory NetForge keeps its state in. It is the
-// system's temporary directory unless a caller chose another one, and nothing
-// outside it is ever touched.
 func StateRoot() string {
 	if root := strings.TrimSpace(os.Getenv(StateRootEnv)); root != "" {
 		return root
@@ -136,14 +84,8 @@ func StateRoot() string {
 	return os.TempDir()
 }
 
-// StateRootEnv names the environment variable that overrides the state root. It
-// exists so a laboratory can be given a directory of its own on a host whose
-// temporary directory is shared with software NetForge does not control.
 const StateRootEnv = "NETFORGE_STATE_ROOT"
 
-// Create makes a state directory of a kind and writes its marker, owned by this
-// process. It hands back the path and the marker, so the caller can report what
-// it made without reading it back.
 func Create(root string, kind Kind, id string, now time.Time) (string, Marker, error) {
 	const op = "reconcile.Create"
 	if root == "" {
@@ -162,9 +104,7 @@ func Create(root string, kind Kind, id string, now time.Time) (string, Marker, e
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return "", Marker{}, apperr.IO(op, "the state root "+root+" could not be prepared", err)
 	}
-	// The name is generated here rather than taken from the caller, because the
-	// name is what a later run has to recognise as NetForge's own. A caller that
-	// chose it could choose one that collides with something else.
+
 	var lastErr error
 	for attempt := 0; attempt < 8; attempt++ {
 		name, err := generated(kind)
@@ -188,9 +128,7 @@ func Create(root string, kind Kind, id string, now time.Time) (string, Marker, e
 			CreatedAt: now.UTC(),
 		}
 		if err := WriteMarker(path, marker); err != nil {
-			// A directory with no marker is not NetForge's as far as any later
-			// run is concerned, so a marker that cannot be written must not be
-			// left behind as something to reason about.
+
 			_ = os.Remove(path)
 			return "", Marker{}, err
 		}
@@ -199,7 +137,6 @@ func Create(root string, kind Kind, id string, now time.Time) (string, Marker, e
 	return "", Marker{}, apperr.IO(op, "a state directory name could not be claimed", lastErr)
 }
 
-// generated returns a fresh directory name for a kind.
 func generated(kind Kind) (string, error) {
 	const op = "reconcile.generated"
 	raw := make([]byte, nameBytes)
@@ -213,11 +150,8 @@ func generated(kind Kind) (string, error) {
 	return name, nil
 }
 
-// MarkerPath is where the marker of a state directory lives.
 func MarkerPath(dir string) string { return filepath.Join(dir, MarkerFile) }
 
-// WriteMarker writes a marker into a state directory atomically, so a reader
-// never sees a marker that is half a marker.
 func WriteMarker(dir string, marker Marker) error {
 	const op = "reconcile.WriteMarker"
 	data, err := json.Marshal(marker)
@@ -231,8 +165,7 @@ func WriteMarker(dir string, marker Marker) error {
 	if err != nil {
 		return apperr.IO(op, "the ownership marker could not be written", err)
 	}
-	// The rename is the commit. Everything before it can fail without leaving a
-	// file a later run would try to trust.
+
 	if _, err := temporary.Write(data); err != nil {
 		_ = temporary.Close()
 		_ = os.Remove(temporary.Name())
@@ -254,13 +187,6 @@ func WriteMarker(dir string, marker Marker) error {
 	return nil
 }
 
-// ReadMarker returns the marker of a state directory.
-//
-// It refuses anything it cannot positively identify: a marker that does not
-// parse, one written in another format, one naming a kind this build does not
-// know, one whose recorded name is not the directory it sits in, and one whose
-// identifier is not a name a namespace could carry. Every one of those is a
-// directory this build did not create and will not remove.
 func ReadMarker(dir string) (Marker, error) {
 	const op = "reconcile.ReadMarker"
 	name := filepath.Base(dir)
@@ -302,41 +228,31 @@ func ReadMarker(dir string) (Marker, error) {
 	return marker, nil
 }
 
-// Entry is one thing under the state root.
 type Entry struct {
-	// Name is the directory's own name.
 	Name string
-	// Path is where it is.
+
 	Path string
-	// Kind is what it is for, and is empty when it could not be identified.
+
 	Kind Kind
-	// ID is the identifier it carries, and is empty when it could not be
-	// identified.
+
 	ID string
-	// Owner is the process that created it, and is zero when unknown.
+
 	Owner int
-	// Created is when it was created, from its marker or from the filesystem.
+
 	Created time.Time
-	// Age is how long ago that was.
+
 	Age time.Duration
-	// Identified reports whether this build positively identified the entry as
-	// NetForge's own. An entry that is not identified is never removed.
+
 	Identified bool
-	// InUse reports whether the process that owns the entry is still running.
+
 	InUse bool
-	// Reason is why the entry is not identified, or why it would not be removed.
+
 	Reason string
 }
 
-// Describe renders an entry as one line, naming what it is and how old it is.
-// An entry that could not be identified is named as unidentified and nothing
-// more: this listing is a claim about what NetForge owns, and it does not make
-// claims about anything else.
 func (e Entry) Describe() string {
 	if !e.Identified {
-		// An unidentified entry carries no identifier at all, not a blank one, so
-		// the reason sits where the identifier would be rather than after an
-		// empty column that could be misread as an empty value.
+
 		return pad(e.Name, listingNameWidth) + pad("unidentified", listingKindWidth) +
 			age(e.Created, e.Age) + e.Reason
 	}
@@ -348,10 +264,6 @@ func (e Entry) Describe() string {
 		pad(e.ID, listingIDWidth) + age(e.Created, e.Age) + state
 }
 
-// The listing's column widths. A router's generated name is longer than a
-// laboratory's, and a column too narrow for it would run the kind into the name —
-// which is not a cosmetic problem here, because the kind is the field that tells
-// the two apart.
 const (
 	listingNameWidth = 32
 	listingKindWidth = 14
@@ -359,8 +271,6 @@ const (
 	listingAgeWidth  = 16
 )
 
-// Identified returns the entries a listing positively identified, which is the
-// only set a reclaim may act on.
 func Identified(entries []Entry) []Entry {
 	var out []Entry
 	for _, entry := range entries {
@@ -371,18 +281,12 @@ func Identified(entries []Entry) []Entry {
 	return out
 }
 
-// Scan lists the state root and classifies everything in it.
-//
-// Nothing is removed and nothing is created. An entry this build cannot
-// positively identify is listed with its reason and no identifier, so an
-// operator can see that something is there without NetForge having claimed it.
 func Scan(root string, now time.Time) ([]Entry, error) {
 	const op = "reconcile.Scan"
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			// A state root that does not exist is a host no run has left
-			// anything in, which is an empty listing rather than a failure.
+
 			return nil, nil
 		}
 		return nil, apperr.IO(op, "the state root "+root+" could not be listed", err)
@@ -395,12 +299,9 @@ func Scan(root string, now time.Time) ([]Entry, error) {
 	return out, nil
 }
 
-// inspect classifies one entry under the state root.
 func inspect(path string, entry fs.DirEntry, now time.Time) Entry {
 	found := Entry{Name: entry.Name(), Path: path}
-	// The age is taken from the filesystem first so that an entry which cannot be
-	// identified still carries one: a reader deciding whether to look at an
-	// unfamiliar directory needs to know how long it has been sitting there.
+
 	if info, err := entry.Info(); err == nil {
 		found.Created = info.ModTime()
 		found.Age = now.Sub(info.ModTime())
@@ -410,9 +311,7 @@ func inspect(path string, entry fs.DirEntry, now time.Time) Entry {
 		return found
 	}
 	if !entry.IsDir() {
-		// A symlink is not a directory either, whatever it points at, and this
-		// is the case where the distinction matters: following one would take a
-		// removal somewhere the name does not say.
+
 		if entry.Type()&fs.ModeSymlink != 0 {
 			found.Reason = "a symlink is not a state directory"
 			return found
@@ -442,13 +341,6 @@ func inspect(path string, entry fs.DirEntry, now time.Time) Entry {
 	return found
 }
 
-// InUse reports whether the process that owns an entry is still running.
-//
-// A directory whose owner is running is a live laboratory's, and removing it
-// would pull its state out from under a run that is still writing to it. The
-// check is deliberately one-sided: a process that died and whose identifier has
-// been reused makes a directory look in use, which costs an operator one manual
-// removal, while the opposite mistake would delete a running laboratory's state.
 func InUse(entry Entry) bool {
 	if !entry.Identified {
 		return false
@@ -456,14 +348,6 @@ func InUse(entry Entry) bool {
 	return entry.InUse
 }
 
-// alive reports whether a process is still running.
-//
-// It asks /proc rather than signalling the process. A signal would be a way to
-// ask a question about a process from code that has no business signalling one,
-// and the repository's security suite holds that boundary for exactly this
-// reason: a reconciler that can signal a process can be argued into doing so.
-// Reading the process's own directory is the same answer with no such power
-// behind it.
 func alive(pid int) bool {
 	if pid <= 0 {
 		return false
@@ -472,23 +356,15 @@ func alive(pid int) bool {
 	if err == nil {
 		return true
 	}
-	// A host with no /proc cannot answer the question. That is reported as
-	// running, because the two errors are not symmetric: refusing to remove a
-	// directory that was already gone costs an operator one manual removal, and
-	// removing a live laboratory's state costs the laboratory.
+
 	if errors.Is(err, fs.ErrNotExist) {
 		return false
 	}
 	return true
 }
 
-// procRoot is where the kernel describes running processes. It is a constant
-// rather than a flag because it is the kernel's own path, not a choice: a
-// reconciler asked to look somewhere else for liveness would be a reconciler
-// whose answer to "is this in use" came from the caller.
 const procRoot = "/proc"
 
-// reasonOf turns a refusal into the sentence a listing prints.
 func reasonOf(err error) string {
 	var appErr *apperr.Error
 	if errors.As(err, &appErr) && appErr.Msg != "" {
@@ -497,10 +373,6 @@ func reasonOf(err error) string {
 	return err.Error()
 }
 
-// pad renders a value at a fixed width, padding on the right. A value longer than
-// the width is followed by a single space rather than nothing, so a name another
-// program left in a shared state root does not run its reason into the next
-// column and make the row unreadable.
 func pad(value string, width int) string {
 	for len(value) < width {
 		value += " "

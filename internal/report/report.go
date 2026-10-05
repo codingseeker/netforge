@@ -1,10 +1,3 @@
-// Package report renders an experiment run as a document a reader or a machine
-// can keep.
-//
-// The report it produces is data, never prose: it is what the run measured,
-// what the run judged, and where the run stopped. Errors are written as
-// strings so a report round-trips through JSON and can be read by anything that
-// speaks JSON.
 package report
 
 import (
@@ -23,80 +16,59 @@ import (
 	"github.com/netforge/netforge/internal/router"
 )
 
-// Report is the report of one run. Every field is derived from the run's own
-// record, so the parts of a report can be cross-checked against each other.
 type Report struct {
-	// Name and ExperimentID identify the run.
 	Name         string `json:"name"`
 	ExperimentID string `json:"experiment_id"`
-	// Seed is the seed the run declared, when it declared one.
+
 	Seed *uint64 `json:"seed,omitempty"`
-	// Succeeded reports whether the run finished. Failed names the state it
-	// stopped in when it did not, and Error is why.
+
 	Succeeded bool   `json:"succeeded"`
 	Failed    string `json:"failed,omitempty"`
 	Error     string `json:"error,omitempty"`
-	// CleanedUp reports whether the laboratory was taken apart.
+
 	CleanedUp bool `json:"cleaned_up"`
-	// Duration is the whole run.
+
 	Duration string `json:"duration"`
-	// Laboratory is what the run built: the namespaces, their addresses, the
-	// endpoints that were listening, who forwarded, and the software router's
-	// counters. It is recorded while the laboratory existed and printed after it
-	// was taken apart, because that is the only order in which both halves are
-	// available.
+
 	Laboratory *Laboratory `json:"laboratory,omitempty"`
-	// Steps is the lifecycle as it ran, in order, so the report says which
-	// states were walked and how long each one took.
+
 	Steps []Step `json:"steps"`
-	// Faults are the records the fault engine made of the injected faults.
+
 	Faults []Fault `json:"faults,omitempty"`
-	// Diagnosis is what the evidence supported. It is always present, even when
-	// no evidence supported anything.
+
 	Diagnosis Diagnosis `json:"diagnosis"`
-	// Recoveries are the outcomes of the authorized actions, if any were.
+
 	Recoveries []Recovery `json:"recoveries,omitempty"`
-	// Metrics are the numbers the run measured.
+
 	Metrics metrics.Metrics `json:"metrics"`
-	// Baseline, Observed and Verified are the measurements of the three points
-	// in the lifecycle that measure something.
+
 	Baseline []probe.Measurement `json:"baseline"`
 	Observed []probe.Measurement `json:"observed"`
 	Verified []probe.Measurement `json:"verified"`
 }
 
-// Laboratory is the laboratory a run built, as it was before it was taken apart.
-//
-// It exists so a report says what it acted on and not only what it measured. A
-// run that reports loss without naming the namespaces, the addresses, the routing
-// mode and the endpoints that answered is a report a reader cannot check against
-// anything.
 type Laboratory struct {
-	// ID is the laboratory's identifier.
 	ID string `json:"id"`
-	// Network is the network it was built on.
+
 	Network string `json:"network"`
-	// Routing names who forwarded in the router namespace.
+
 	Routing string `json:"routing"`
-	// KernelForwarding is what the router namespace reported for
-	// net.ipv4.ip_forward. A software-routed run reads "0", which is the proof
-	// that the kernel forwarded nothing.
+
 	KernelForwarding string `json:"ip_forward"`
-	// RouterNamespace is the namespace that forwards.
+
 	RouterNamespace string `json:"router_namespace"`
-	// RouterLinks are the router's addresses, one per link.
+
 	RouterLinks []string `json:"router_links,omitempty"`
-	// Nodes are the namespaces that carried traffic, with their addresses.
+
 	Nodes []LaboratoryNode `json:"nodes,omitempty"`
-	// Services are the endpoints each namespace reported bound.
+
 	Services []LaboratoryService `json:"services,omitempty"`
-	// Router is the software router's counters, when the run reported them.
+
 	Router *router.Stats `json:"router,omitempty"`
-	// RouterError is why they could not be reported, when they could not be.
+
 	RouterError string `json:"router_error,omitempty"`
 }
 
-// LaboratoryNode is one namespace of a laboratory and the address it held.
 type LaboratoryNode struct {
 	Role      string `json:"role"`
 	Namespace string `json:"namespace"`
@@ -104,82 +76,66 @@ type LaboratoryNode struct {
 	Gateway   string `json:"gateway,omitempty"`
 }
 
-// LaboratoryService is one serving namespace and what it reported listening.
 type LaboratoryService struct {
 	Namespace string   `json:"namespace"`
 	Endpoints []string `json:"endpoints,omitempty"`
 }
 
-// Step is one state of the lifecycle as it ran.
 type Step struct {
-	// State is the lifecycle state this was.
 	State string `json:"state"`
-	// Detail is what the step was going to do.
+
 	Detail string `json:"detail,omitempty"`
-	// Duration is how long the step took.
+
 	Duration string `json:"duration,omitempty"`
-	// Error is why the step failed, if it did.
+
 	Error string `json:"error,omitempty"`
-	// Recovery names the actions the step performed.
+
 	Recovery string `json:"recovery,omitempty"`
 }
 
-// Fault is the record of one injected fault, kept short enough to read and
-// exact enough to trace back to the engine's own record.
 type Fault struct {
-	// ID is the engine's record identifier.
 	ID string `json:"fault_id"`
-	// Kind is the fault that was injected.
+
 	Kind string `json:"type"`
-	// Target is the endpoint that felt the fault.
+
 	Target string `json:"target"`
-	// Direction names the side of the link that was impaired.
+
 	Direction string `json:"direction,omitempty"`
-	// Status is the fault's recorded status.
+
 	Status string `json:"status"`
 }
 
-// Diagnosis is what the evidence supported, and the reasoning that reached it.
 type Diagnosis struct {
-	// Classification is how far the evidence carried the conclusion.
 	Classification string `json:"classification"`
-	// Layer is the layer the failure was attributed to.
+
 	Layer string `json:"layer,omitempty"`
-	// Summary is the conclusion in a sentence.
+
 	Summary string `json:"summary,omitempty"`
-	// Rule is the rule that produced the classification.
+
 	Rule string `json:"rule,omitempty"`
-	// Evidence is how many measurements the report cites.
+
 	Evidence int `json:"evidence_count"`
-	// ProbesRun is how many probes the investigation took.
+
 	ProbesRun int `json:"probes_run"`
 }
 
-// Recovery is the outcome of one authorized recovery action.
 type Recovery struct {
-	// Action and Target name the action that was authorized.
 	Action string `json:"action"`
 	Target string `json:"target"`
-	// From is the namespace the verification probe ran in.
+
 	From string `json:"from,omitempty"`
-	// Reason is the operator's justification, written before the run.
+
 	Reason string `json:"reason,omitempty"`
-	// Passed reports whether the action ran and the measurement agreed.
+
 	Passed bool `json:"passed"`
-	// RecoveredAt is when the action finished.
+
 	RecoveredAt string `json:"recovered_at,omitempty"`
-	// Result is the verification verdict in a sentence.
+
 	Result string `json:"result,omitempty"`
-	// Error is why the action failed, if it did.
+
 	Error string `json:"error,omitempty"`
 }
 
-// FromExperiment turns an experiment run into a report.
-//
-// The laboratory is passed in rather than read out of the run, because the
-// environment that built it holds it as a value: the namespaces are gone by the
-// time the run is reported, and a report that asked for them again would be
-// asking about a laboratory that no longer exists.
 func FromExperiment(run experiment.Report, laboratory *network.Summary) Report {
 	out := Report{
 		Name:         run.Name,
@@ -215,7 +171,6 @@ func FromExperiment(run experiment.Report, laboratory *network.Summary) Report {
 	return out
 }
 
-// EncodeJSON writes the report as JSON.
 func EncodeJSON(w io.Writer, run experiment.Report, laboratory *network.Summary) error {
 	encoded, err := json.MarshalIndent(FromExperiment(run, laboratory), "", "  ")
 	if err != nil {
@@ -225,7 +180,6 @@ func EncodeJSON(w io.Writer, run experiment.Report, laboratory *network.Summary)
 	return err
 }
 
-// EncodeText writes the report as text a person can read.
 func EncodeText(w io.Writer, run experiment.Report, laboratory *network.Summary) error {
 	report := FromExperiment(run, laboratory)
 	if err := writeLine(w, "experiment: %s\n", report.Name); err != nil {
@@ -307,12 +261,6 @@ func EncodeText(w io.Writer, run experiment.Report, laboratory *network.Summary)
 	return nil
 }
 
-// writeLaboratory prints what the run built, before the metrics that were
-// measured on it.
-//
-// It is printed even when the run failed, and in particular when it failed in
-// setup, because a run that built nothing is the run whose report has to say so
-// rather than leave the section out.
 func writeLaboratory(w io.Writer, lab *Laboratory) error {
 	if lab == nil {
 		return nil
@@ -371,10 +319,7 @@ func writeLaboratory(w io.Writer, lab *Laboratory) error {
 		}
 		return nil
 	}
-	// The counters are the only way a reader can tell from outside the process
-	// whether a forwarded byte came from NetForge or from the kernel, so they are
-	// printed whenever the software router was in use, and their absence is said
-	// rather than passed over.
+
 	stats := lab.Router
 	return writeLine(w, "  router:\n"+
 		"    received %d, forwarded %d, bytes %d\n"+
@@ -389,7 +334,6 @@ func writeLaboratory(w io.Writer, lab *Laboratory) error {
 		stats.QueueDepth, stats.QueueSize, stats.Routes, stats.Neighbors, stats.SendErrors)
 }
 
-// laboratoryOf renders the laboratory the environment recorded.
 func laboratoryOf(summary *network.Summary) *Laboratory {
 	if summary == nil {
 		return nil

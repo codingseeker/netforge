@@ -98,11 +98,6 @@ func TestHelpOutput(t *testing.T) {
 	}
 }
 
-// The run subcommand is where the laboratory is created, so it is the only
-// command whose help has to name the flags that change what gets built. A flag
-// the help does not mention is a flag nobody can discover, and an operator who
-// cannot discover the software router or a service is an operator who measures
-// the kernel by accident.
 func TestHelpForExperimentRunNamesEveryLaboratoryFlag(t *testing.T) {
 	result := run(t, context.Background(), "", "help", "experiment", "run")
 	if result.err != nil {
@@ -121,9 +116,7 @@ func TestHelpForExperimentRunNamesEveryLaboratoryFlag(t *testing.T) {
 			t.Errorf("the help for experiment run %q does not mention %q", result.stdout, want)
 		}
 	}
-	// The help states the two things an operator has to know before choosing
-	// them: what the modes are, and that a protocol needing a listener must ask
-	// for one. A flag that names neither is a flag that has to be guessed at.
+
 	for _, want := range []string{"kernel or software", "needs a listener"} {
 		if !strings.Contains(result.stdout, want) {
 			t.Errorf("the help for experiment run %q does not say %q", result.stdout, want)
@@ -138,8 +131,7 @@ func TestHelpForCommand(t *testing.T) {
 	}{
 		{args: []string{"help", "config"}, want: []string{"validate", "show", "Subcommands:"}},
 		{args: []string{"help", "config", "validate"}, want: []string{"--show-effective", "Usage:"}},
-		// A subcommand is introduced by the path that reaches it. Printing the
-		// leaf name alone answers for a command that does not exist.
+
 		{args: []string{"help", "experiment", "run"}, want: []string{"netforge experiment run -", "--authorize"}},
 		{args: []string{"experiment", "run", "--help"}, want: []string{"netforge experiment run -"}},
 		{args: []string{"help", "limits"}, want: []string{"limits show"}},

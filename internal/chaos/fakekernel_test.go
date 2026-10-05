@@ -7,12 +7,6 @@ import (
 	"time"
 )
 
-// The helpers below model how the kernel turns an argument vector into the
-// state it reports back. They are deliberately literal: a duration becomes
-// seconds, a percentage becomes a fraction, a rate becomes bytes per second and
-// the queueing limit becomes microseconds, because that is exactly the
-// conversion the engine has to survive.
-
 var handleCounter = 0x8000
 
 func nextHandle() string {
@@ -20,7 +14,6 @@ func nextHandle() string {
 	return strconv.FormatInt(int64(handleCounter), 16) + ":"
 }
 
-// argumentAfter returns the value that follows a flag.
 func argumentAfter(argv []string, flag string) string {
 	for i := 0; i+1 < len(argv); i++ {
 		if argv[i] == flag {
@@ -39,7 +32,6 @@ func hasArgument(argv []string, flag string) bool {
 	return false
 }
 
-// qdiscKind finds which discipline an install vector asks for.
 func qdiscKind(argv []string) string {
 	for _, item := range argv {
 		switch item {
@@ -140,7 +132,6 @@ func kernelNetem(argv []string, lie bool) map[string]any {
 	return options
 }
 
-// argumentsAfter returns the values that follow a flag.
 func argumentsAfter(argv []string, flag string) []string {
 	for i := 0; i+1 < len(argv); i++ {
 		if argv[i] == flag {
@@ -167,9 +158,6 @@ func parsePercent(value string) float64 {
 	return parsed / 100
 }
 
-// parseBits reads a rate or a size and returns it in bits per second, which is
-// the unit the engine asks for. Traffic control writes a bare number as bytes
-// and accepts bit, kbit, mbit, gbit, b, kb, mb and gb.
 func parseBits(value string) uint64 {
 	number := value
 	multiplier := uint64(8)
@@ -198,7 +186,6 @@ func parseBits(value string) uint64 {
 	return parsed * multiplier
 }
 
-// renderState is used by the tests that need a kernel report for a device.
 func renderState(entries ...map[string]any) string {
 	data, err := json.Marshal(entries)
 	if err != nil {

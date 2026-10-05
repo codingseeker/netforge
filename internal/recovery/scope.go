@@ -10,23 +10,14 @@ import (
 	"github.com/netforge/netforge/internal/namespace"
 )
 
-// Scope is the part of a laboratory a recovery is allowed to touch. It is
-// taken from the experiment's own scope rather than from the running
-// laboratory, so an authorization cannot be widened by whatever happens to be
-// up at the time it is granted.
 type Scope struct {
-	// Network is the network the scope grants. An address outside it is out of
-	// scope even when it is reachable.
 	Network netip.Prefix
-	// Namespaces are the laboratory namespaces the scope grants.
+
 	Namespaces []string
-	// Experiment is the experiment the scope belongs to. An authorization
-	// granted for one experiment is refused for another, so a grant cannot be
-	// carried from a previous run into this one.
+
 	Experiment string
 }
 
-// NewScope builds a scope from a network and the namespaces of an experiment.
 func NewScope(experiment, network string, namespaces []string) (Scope, error) {
 	const op = "recovery.NewScope"
 	if experiment == "" {
@@ -54,14 +45,10 @@ func NewScope(experiment, network string, namespaces []string) (Scope, error) {
 	return Scope{Network: prefix, Namespaces: granted, Experiment: experiment}, nil
 }
 
-// ScopeOf builds the scope of a validated experiment document. It is the one
-// place a scope is derived, so the controller and an operator cannot end up
-// working from different grants.
 func ScopeOf(document config.Config) (Scope, error) {
 	return NewScope(document.ExperimentID(), document.Scope.Network, document.Scope.Namespaces)
 }
 
-// AllowsNamespace reports whether the scope grants a laboratory namespace.
 func (s Scope) AllowsNamespace(name string) bool {
 	_, granted := s.lookup(name)
 	return granted
@@ -76,19 +63,11 @@ func (s Scope) lookup(name string) (int, bool) {
 	return 0, false
 }
 
-// AllowsAddress reports whether an address falls inside the granted network.
-// An address with a zone, a port or a host part is refused rather than
-// trimmed: a target that does not parse as a bare address is not a target
-// this package will act on.
 func (s Scope) AllowsAddress(address string) bool {
 	addr, err := netip.ParseAddr(address)
 	return err == nil && addr.Zone() == "" && s.Network.Contains(addr.Unmap())
 }
 
-// AllowsObservation checks the address an experiment measures. A measurement is
-// taken of one address, so a port or a prefix is refused here: allowing a port
-// would let a plan claim to observe one address while the probe was pointed at
-// another service on the same host, which is a different experiment.
 func (s Scope) AllowsObservation(target string) error {
 	const op = "recovery.Scope"
 	if target == "" {
@@ -108,11 +87,6 @@ func (s Scope) AllowsObservation(target string) error {
 	return nil
 }
 
-// AllowsTarget checks a target against the scope, using the form the action acts
-// on: a namespace for a namespace action, a destination for a route, and an
-// endpoint for a backend. A namespace action is checked against the namespace
-// list and an address action against the network, so neither can borrow the
-// other's grant.
 func (s Scope) AllowsTarget(action Action, target string) error {
 	const op = "recovery.Scope"
 	if target == "" {
@@ -132,14 +106,6 @@ func (s Scope) AllowsTarget(action Action, target string) error {
 	}
 }
 
-// allowsDestination accepts a route destination: a prefix, or a bare address
-// which is read as the host route to that one address.
-//
-// The whole destination has to sit inside the granted network. A prefix that
-// shares a few leading bits with the scope but reaches past it is refused,
-// because restoring a route to somewhere outside the scope is precisely the
-// mistake a scope exists to prevent, and a prefix that contains the scope is
-// the clearest case of it.
 func (s Scope) allowsDestination(op, target string) error {
 	prefix, err := netip.ParsePrefix(target)
 	if err != nil {
@@ -167,12 +133,6 @@ func (s Scope) allowsDestination(op, target string) error {
 	return nil
 }
 
-// allowsEndpoint accepts the form a balancer knows a backend by: an address and
-// a port, or a bare address for a backend that is a whole device.
-//
-// The port is not part of the scope question, but the address it carries is: a
-// backend outside scope.network is refused however it is spelled, and a zone is
-// refused because a laboratory has no interfaces to route a zone to.
 func (s Scope) allowsEndpoint(op string, action Action, target string) error {
 	endpoint, err := netip.ParseAddrPort(target)
 	if err != nil {
@@ -191,7 +151,6 @@ func (s Scope) allowsEndpoint(op string, action Action, target string) error {
 	return nil
 }
 
-// String renders the scope for a log line or a report.
 func (s Scope) String() string {
 	return s.Experiment + " network=" + s.Network.String() + " namespaces=[" + strings.Join(s.Namespaces, ",") + "]"
 }

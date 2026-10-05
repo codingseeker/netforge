@@ -12,25 +12,20 @@ import (
 	"github.com/netforge/netforge/internal/apperr"
 )
 
-// fakeKernel is a small model of the part of the kernel the engine talks to.
-// It keeps a queue discipline per device, so a test exercises the same install,
-// inspect and remove sequence the real kernel sees rather than a script of
-// canned answers.
 type fakeKernel struct {
 	mu      sync.Mutex
 	devices map[string]*fakeDevice
 	log     []string
-	// failNext makes the next mutating command fail, to exercise rollback.
+
 	failNext string
-	// lie makes the next inspection report a discipline that does not match
-	// what was installed, to exercise verification.
+
 	lie bool
 }
 
 type fakeDevice struct {
 	kind   string
 	handle string
-	// options is the shape the kernel would report for the discipline.
+
 	options map[string]any
 	present bool
 }
@@ -83,8 +78,6 @@ func ensureDevice(devices map[string]*fakeDevice, name string) *fakeDevice {
 	return created
 }
 
-// install models the kernel's own behaviour: a replace of a netem qdisc merges
-// into whatever is already there, and handles are assigned by the kernel.
 func (f *fakeKernel) install(device string, argv []string) {
 	target := f.devices[device]
 	kind := qdiscKind(argv)
@@ -128,7 +121,6 @@ func (f *fakeKernel) commands() []string {
 	return append([]string(nil), f.log...)
 }
 
-// fakeTopology is a laboratory of two namespaces joined by one link.
 type fakeTopology struct {
 	links map[string]Endpoint
 	names map[string][]string
@@ -227,8 +219,7 @@ func TestEngineAppliesAndVerifiesEveryKind(t *testing.T) {
 			if !kernel.installed("nfc0") {
 				t.Error("the kernel was left without the fault")
 			}
-			// The evidence has to come from the kernel, and it has to agree
-			// with the request.
+
 			if fault.Observed.Kind == "" {
 				t.Error("the record carries no kernel observation")
 			}
@@ -273,7 +264,6 @@ func TestEngineInstallsAndRemoves(t *testing.T) {
 		t.Error("a removed fault must not keep claiming a kernel observation")
 	}
 
-	// Removing again is a no-op, not a failure: cleanup runs more than once.
 	again, err := engine.Remove(fault.ID)
 	if err != nil {
 		t.Fatalf("removing a removed fault must succeed, got %v", err)
@@ -300,8 +290,6 @@ func TestEngineRefusesAnythingOutsideTheScope(t *testing.T) {
 		t.Errorf("a refused fault still ran %v", kernel.commands())
 	}
 
-	// Even if a caller reaches the runner directly, an unscoped namespace is
-	// refused before the command runs.
 	if _, _, _, err := engine.run("host", "tc", "qdisc", "show", "dev", "eth0"); !apperr.IsKind(err, apperr.KindPermission) {
 		t.Errorf("got %v, want a permission error", err)
 	}
@@ -324,7 +312,6 @@ func TestEngineRefusesUnknownDevices(t *testing.T) {
 		t.Errorf("an unknown device still ran %v", kernel.commands())
 	}
 
-	// The router has two data interfaces, so the caller has to name one.
 	_, err = engine.Apply(context.Background(), "exp-1", Spec{
 		Target: "nf-router-tc", Kind: KindLatency, Parameters: Parameters{Latency: Duration(time.Millisecond)},
 	})
@@ -378,7 +365,6 @@ func TestEngineKeepsOneFaultPerDevice(t *testing.T) {
 		t.Fatalf("got %v, want a conflict", err)
 	}
 
-	// A different device of the same namespace is fine.
 	if _, err := engine.Apply(context.Background(), "exp-1", Spec{
 		Target: "nf-server0-tc", Kind: KindLatency, Parameters: Parameters{Latency: Duration(time.Millisecond)},
 	}); err != nil {
@@ -468,9 +454,7 @@ func TestEngineRemovesEverythingWhenClosed(t *testing.T) {
 	if err := engine.Close(); err != nil {
 		t.Errorf("closing twice must succeed, got %v", err)
 	}
-	// A fresh id has to be refused as well. An id that was used before would
-	// be refused anyway by the history, so it cannot tell a closed engine from
-	// a busy one.
+
 	_, err := engine.Apply(context.Background(), "exp-after-close", Spec{
 		Target: "nf-client0-tc", Kind: KindPacketLoss, Parameters: Parameters{Loss: 10},
 	})
@@ -483,8 +467,7 @@ func TestEngineRemovesEverythingWhenClosed(t *testing.T) {
 	if kernel.installed("nfc0") {
 		t.Error("a fault was put in the kernel after the engine was closed")
 	}
-	// Removal has to keep working, since it is how a laboratory hands its
-	// faults back, but there is nothing left to remove.
+
 	if err := engine.RemoveAll(); err != nil {
 		t.Errorf("RemoveAll on a closed engine: %v", err)
 	}
@@ -642,7 +625,7 @@ func TestEngineRefusesWorkAfterTheContextEnds(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	// A laboratory that goes away must not leave a fault behind.
+
 	cancel()
 	deadline := time.Now().Add(5 * time.Second)
 	for engine.Active() > 0 && time.Now().Before(deadline) {

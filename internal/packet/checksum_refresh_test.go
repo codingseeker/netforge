@@ -7,15 +7,6 @@ import (
 	"github.com/netforge/netforge/internal/apperr"
 )
 
-// These tests cover the checksum a forwarder has to repair rather than trust.
-//
-// A frame read from a packet socket shows the bytes as they are on the wire. A
-// sender whose stack offloads the transport sum writes only the seed of the
-// checksum into those bytes and leaves the rest to the receiving kernel, so a
-// forwarder that copies them hands the far end a packet it rejects as corrupt.
-// The audit that found this watched a refused connection that never answered
-// and looked exactly like a path that was down.
-
 func parsedFrame(t *testing.T, encoded string) *Frame {
 	t.Helper()
 	frame, err := ParseFrame(DefaultLimits(), decodeVector(t, encoded))
@@ -25,9 +16,6 @@ func parsedFrame(t *testing.T, encoded string) *Frame {
 	return frame
 }
 
-// TestRefreshTransportChecksumRepairsAnUnfinishedSeed replaces the checksum of
-// each protocol with the seed an offloading sender would have left, and requires
-// the refresh to produce a checksum that verifies.
 func TestRefreshTransportChecksumRepairsAnUnfinishedSeed(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -40,8 +28,7 @@ func TestRefreshTransportChecksumRepairsAnUnfinishedSeed(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			frame := parsedFrame(t, test.frame)
-			// A seed is any value that does not verify: the sending stack had
-			// not finished the sum, so whatever is in the field is wrong.
+
 			putChecksum(frame.IP.Payload[test.offset:test.offset+2], 0x1234)
 			if err := RefreshTransportChecksum(frame.IP); err != nil {
 				t.Fatalf("RefreshTransportChecksum() = %v, want nil", err)
@@ -67,9 +54,6 @@ func TestRefreshTransportChecksumRepairsAnUnfinishedSeed(t *testing.T) {
 	}
 }
 
-// TestRefreshTransportChecksumLeavesACorrectFrameAlone checks the other half: a
-// frame that already verifies must come out of the refresh byte for byte as it
-// went in. A repair that changed a correct frame would be a second defect.
 func TestRefreshTransportChecksumLeavesACorrectFrameAlone(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -93,9 +77,6 @@ func TestRefreshTransportChecksumLeavesACorrectFrameAlone(t *testing.T) {
 	}
 }
 
-// TestRefreshTransportChecksumKeepsAnOmittedDatagramChecksum covers RFC 768: a
-// zero checksum says the sender omitted it, so a repair that computed one would
-// be changing the datagram rather than fixing it.
 func TestRefreshTransportChecksumKeepsAnOmittedDatagramChecksum(t *testing.T) {
 	frame := parsedFrame(t, udpZeroChecksumFrame)
 	if !frame.UDP.ChecksumOmitted {
@@ -114,12 +95,9 @@ func TestRefreshTransportChecksumKeepsAnOmittedDatagramChecksum(t *testing.T) {
 	}
 }
 
-// TestRefreshTransportChecksumIgnoresProtocolsItCannotSum leaves an unknown
-// protocol exactly as it arrived. The bytes of a protocol this layer does not
-// implement are not this layer's to change.
 func TestRefreshTransportChecksumIgnoresProtocolsItCannotSum(t *testing.T) {
 	frame := parsedFrame(t, icmpEchoFrame)
-	frame.IP.Protocol = Protocol(47) // GRE
+	frame.IP.Protocol = Protocol(47)
 	frame.IP.Payload = []byte{0x00, 0x00, 0x00, 0x00, 0xde, 0xad, 0xbe, 0xef}
 	before := append([]byte(nil), frame.IP.Payload...)
 
@@ -131,9 +109,6 @@ func TestRefreshTransportChecksumIgnoresProtocolsItCannotSum(t *testing.T) {
 	}
 }
 
-// TestRefreshTransportChecksumRefusesATruncatedPayload refuses a payload too
-// short to hold the checksum field it is being asked to write, rather than
-// writing outside the slice.
 func TestRefreshTransportChecksumRefusesATruncatedPayload(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -165,9 +140,6 @@ func TestRefreshTransportChecksumRefusesATruncatedPayload(t *testing.T) {
 	}
 }
 
-// TestRefreshTransportChecksumRefusesNothing checks the two cases that are not a
-// refusal: an empty payload, which is nothing to checksum, and no packet at all,
-// which is reported rather than dereferenced.
 func TestRefreshTransportChecksumNeedsNothingToDo(t *testing.T) {
 	ip := &IPv4{Protocol: ProtocolUDP, Payload: nil}
 	if err := RefreshTransportChecksum(ip); err != nil {

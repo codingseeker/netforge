@@ -43,19 +43,13 @@ func ValidateName(op, field, name string) error {
 	return nil
 }
 
-// Result is the outcome of a command that ran inside a namespace.
 type Result struct {
-	// Stdout and Stderr are what the command printed.
 	Stdout string
 	Stderr string
-	// Code is the exit status. A command that ran but failed reports a
-	// nonzero code here rather than an error, because a nonzero status is
-	// often the answer the caller asked for: a probe that lost packets, a
-	// route that does not exist.
+
 	Code int
 }
 
-// Failed reports whether the command ran and reported a nonzero exit status.
 func (r Result) Failed() bool { return r.Code != 0 }
 
 type Lab struct {
@@ -283,9 +277,6 @@ func (s *Space) Exec(argv ...string) (string, string, error) {
 	return result.Stdout, result.Stderr, nil
 }
 
-// Run executes a command in the namespace and reports its exit status. A
-// caller that has to know whether the command succeeded uses this; a caller
-// that only reads the output of a command that may fail harmlessly uses Exec.
 func (s *Space) Run(argv ...string) (Result, error) {
 	if s == nil || s.pid == 0 {
 		return Result{}, ErrNotFound

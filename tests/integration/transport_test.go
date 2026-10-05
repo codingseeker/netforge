@@ -21,53 +21,24 @@ import (
 	"github.com/netforge/netforge/internal/transport"
 )
 
-// The benchmark compares plain UDP, TCP and NetForge's reliable UDP over the
-// same impaired path. The faults are injected by the kernel inside the
-// laboratory's namespaces rather than by a proxy in userspace, because a
-// proxy that drops bytes from a TCP stream corrupts that stream instead of
-// modelling packet loss: TCP would never retransmit what a proxy swallowed,
-// so the comparison would be measuring the proxy rather than the transports.
-//
-// The client half of every transfer runs in the client namespace, because a
-// test process cannot enter a network namespace without taking its own threads
-// with it. It re-executes this test binary with -test.run set to the child
-// test below, and reports one RESULT line per transport.
-
 const (
-	// benchmarkStreamPort is a separate endpoint because the service's TCP echo
-	// answers one request and hangs up, which is what a probe measures and not
-	// what a transfer needs.
 	benchmarkStreamPort = 9303
 	benchmarkUDPPort    = 9301
 	benchmarkRUDPPort   = 9302
-	// benchmarkMessages and benchmarkSize fix the work every transport is asked
-	// to do, so the numbers are comparable: 256 payloads of 1 KiB, which is
-	// enough work that a lossy path shows what retransmission costs. A transfer
-	// of a few payloads measures the path's first packet, not its behaviour.
+
 	benchmarkMessages = 256
 	benchmarkSize     = 1024
-	// benchmarkTransfer bounds one transport's transfer. A path that cannot
-	// finish in this time has failed, which is a result rather than a hang. It
-	// is generous because a lossy path with a collapsed window is slow by
-	// design, and a bound that ended the measurement would report the bound.
+
 	benchmarkTransfer = 60 * time.Second
-	// benchmarkRead bounds one read on an unreliable transport, where a lost
-	// datagram is never retried and the read has to give up on its own.
+
 	benchmarkRead = 400 * time.Millisecond
-	// benchmarkNetwork and benchmarkMTU are the laboratory the comparison runs
-	// in. They are named rather than written at the call site because the
-	// recorded report has to carry them.
+
 	benchmarkNetwork = "10.42.0.0/24"
 	benchmarkMTU     = 1500
 )
 
-// resultPrefix marks the child's report so the parent can find it among the
-// test framework's own output.
 const resultPrefix = "RESULT "
 
-// The client's arguments are registered before the test framework parses the
-// command line, because a flag declared inside a test is not known yet when
-// the parsing happens and the child would be rejected before it started.
 var (
 	benchAddress = flag.String("benchmark-address", "",
 		"the server address the benchmark client measures against")
@@ -76,7 +47,6 @@ var (
 	benchRUDPPort = flag.Int("benchmark-rudp", 0, "the server's echo port for reliable UDP")
 )
 
-// measurement is what one transport achieved over one path.
 type measurement struct {
 	Transport string  `json:"transport"`
 	Sent      int     `json:"sent"`
@@ -86,10 +56,7 @@ type measurement struct {
 	Retransm  int     `json:"retransmitted"`
 	SentSegs  int     `json:"sent_segments"`
 	AckedSegs int     `json:"acknowledged"`
-	// The receive side's own state, so a failure can be told apart from a
-	// path that lost data: a connection holding what it was sent, with a
-	// reader that was not given it, failed differently from one that never
-	// received it.
+
 	Buffered   int     `json:"buffered"`
 	Waiting    int     `json:"waiting"`
 	Duplicated int     `json:"duplicated"`
@@ -102,8 +69,6 @@ type measurement struct {
 	Error      string  `json:"error,omitempty"`
 }
 
-// throughput is bytes handed to the transport per second, which is what was
-// offered rather than what arrived.
 func (m measurement) throughput() float64 {
 	if m.Elapsed <= 0 {
 		return 0
@@ -111,9 +76,6 @@ func (m measurement) throughput() float64 {
 	return float64(m.Sent) / (m.Elapsed / 1000)
 }
 
-// goodput is payload bytes that arrived intact per second, which is what the
-// application actually got. A transport that loses data cannot be credited
-// with the bytes it discarded.
 func (m measurement) goodput() float64 {
 	if m.Elapsed <= 0 {
 		return 0
@@ -121,7 +83,6 @@ func (m measurement) goodput() float64 {
 	return float64(m.Delivered) / (m.Elapsed / 1000)
 }
 
-// lossPercent is the share of sent payload that never arrived.
 func (m measurement) lossPercent() float64 {
 	if m.Sent == 0 {
 		return 0
@@ -129,16 +90,12 @@ func (m measurement) lossPercent() float64 {
 	return 100 * float64(m.Sent-m.Delivered) / float64(m.Sent)
 }
 
-// condition is one path the comparison is run over.
 type condition struct {
 	name   string
 	spec   *chaos.Spec
 	reason string
 }
 
-// benchmarkConditions are the scenarios the comparison records. Every one of
-// them is described rather than implied, because a number without its
-// conditions is not a result.
 func benchmarkConditions() []condition {
 	loss := func(percent int) *chaos.Spec {
 		return &chaos.Spec{
@@ -175,10 +132,6 @@ func benchmarkConditions() []condition {
 	}
 }
 
-// TestTransportComparisonRecordsEveryScenario runs the comparison over every
-// recorded condition and checks the numbers mean what they claim to. It writes
-// the table it measured to docs/BENCHMARKS.md, so the evidence in the
-// documentation is the run rather than a copy of it.
 func TestTransportComparisonRecordsEveryScenario(t *testing.T) {
 	rows, err := measureComparison(t)
 	if err != nil {
@@ -189,9 +142,6 @@ func TestTransportComparisonRecordsEveryScenario(t *testing.T) {
 	}
 }
 
-// measureComparison builds one laboratory per condition, impairs the path with
-// the kernel, and asks a client in the client namespace to run the three
-// transfers across it.
 func measureComparison(t *testing.T) ([]benchmarkRow, error) {
 	t.Helper()
 	var rows []benchmarkRow
@@ -210,8 +160,6 @@ func measureComparison(t *testing.T) ([]benchmarkRow, error) {
 	return rows, nil
 }
 
-// runCondition creates the laboratory, applies the fault, and collects what the
-// client saw on the far side of it.
 func runCondition(t *testing.T, test condition) ([]measurement, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
@@ -234,19 +182,14 @@ func runCondition(t *testing.T, test condition) ([]measurement, error) {
 		MaxProbes: 10, MaxRate: 200, MaxSize: 1400,
 		MaxDuration: 100 * time.Second, MaxConcurrent: 1,
 	}
-	// The echo endpoints have to exist in the server namespace before the
-	// client is pointed at them.
+
 	spec.Services = []network.ServiceSpec{{
 		Namespace:  plan.Nodes[1].Namespace,
 		StreamPort: benchmarkStreamPort,
 		UDPPort:    benchmarkUDPPort,
 		RUDPPort:   benchmarkRUDPPort,
 		MaxRequest: transport.MaxPayloadSize,
-		// The service's timeout bounds one exchange and is also the idle bound
-		// of its reliable endpoint. A probe needs a few seconds; a transfer
-		// across a lossy path needs longer than that to be answered, and a
-		// bound that expires mid-transfer ends the echo rather than the fault
-		// being measured.
+
 		Timeout: 30 * time.Second,
 	}}
 	lab, err := network.Create(ctx, spec)
@@ -269,8 +212,7 @@ func runCondition(t *testing.T, test condition) ([]measurement, error) {
 	}
 	if test.spec != nil {
 		fault := *test.spec
-		// The fault is applied to the client end of the link, so the client
-		// sees the impaired path and the server's own queue stays clean.
+
 		fault.Target = client.Namespace
 		fault.Interface = client.Interface
 		if _, err := lab.Chaos().Apply(ctx, "transport-comparison", fault); err != nil {
@@ -313,8 +255,6 @@ func runCondition(t *testing.T, test condition) ([]measurement, error) {
 	return results, nil
 }
 
-// parseResults reads the child's report, which is one RESULT line per
-// transport and nothing the parent has to interpret any other way.
 func parseResults(stdout string) ([]measurement, error) {
 	var out []measurement
 	for _, line := range strings.Split(stdout, "\n") {
@@ -339,8 +279,6 @@ func parseResults(stdout string) ([]measurement, error) {
 	return out, nil
 }
 
-// checkMeasurement asserts what a result has to mean before it is recorded, so
-// a broken measurement cannot be written down as a comparison.
 func checkMeasurement(test condition, got measurement) error {
 	if got.Sent != benchmarkMessages*benchmarkSize {
 		return fmt.Errorf("%s was offered %d bytes, want %d",
@@ -352,8 +290,7 @@ func checkMeasurement(test condition, got measurement) error {
 	}
 	switch got.Transport {
 	case "rudp":
-		// A reliable transport that loses payload is not reliable, whatever
-		// the path did to it.
+
 		if got.Delivered != got.Sent || !got.Complete {
 			return fmt.Errorf("the reliable transport delivered %d of %d bytes, complete=%t, "+
 				"segments sent=%d acknowledged=%d retransmitted=%d window=%d, "+
@@ -367,8 +304,7 @@ func checkMeasurement(test condition, got measurement) error {
 			return fmt.Errorf("the reliable transport reported %d retransmissions", got.Retransm)
 		}
 	default:
-		// An unreliable transport is allowed to lose data, but not to invent
-		// any: nothing it reports may exceed what was sent.
+
 		if got.Delivered > got.Sent {
 			return fmt.Errorf("%s delivered %d bytes from %d sent",
 				got.Transport, got.Delivered, got.Sent)
@@ -380,10 +316,6 @@ func checkMeasurement(test condition, got measurement) error {
 	return nil
 }
 
-// TestTransportBenchmarkChild is the client half of the comparison. It runs
-// inside the client namespace, against the echo endpoints the server namespace
-// serves, and reports one line per transport. It is not a test in its own
-// right: it exits through the report.
 func TestTransportBenchmarkChild(t *testing.T) {
 	if *benchAddress == "" {
 		t.Skip("this test is the client half of the comparison and is run by its parent")
@@ -414,10 +346,6 @@ func TestTransportBenchmarkChild(t *testing.T) {
 	}
 }
 
-// measureUDP offers the same payloads over a plain datagram socket. There is
-// no retransmission, so a lost datagram is a lost payload and the read that
-// would have received it has to give up: the transfer finishes when the path
-// stops answering, not when everything arrives.
 func measureUDP(address string) (measurement, error) {
 	conn, err := net.Dial("udp", address)
 	if err != nil {
@@ -428,7 +356,6 @@ func measureUDP(address string) (measurement, error) {
 	return runTransfer(stream)
 }
 
-// measureTCP offers the same payloads over a stream socket.
 func measureTCP(address string) (measurement, error) {
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
@@ -442,34 +369,17 @@ func measureTCP(address string) (measurement, error) {
 	return runTransfer(stream)
 }
 
-// benchmarkRUDPLimits are the reliable transport's limits for this comparison.
-// They are a package variable rather than a literal inside measureRUDP because
-// the recorded report has to carry the limits the numbers were produced with; a
-// transport benchmark whose window size is not written down is not
-// reproducible.
 var benchmarkRUDPLimits = transport.Limits{
 	MaxConnections: 4,
 	MaxPayload:     benchmarkSize,
 	MaxWindow:      32,
-	// The idle timeout is a liveness bound, and this run is measuring
-	// throughput on a path that is deliberately slow to recover on. A bound
-	// tuned for a healthy path would end these transfers while they were
-	// still making progress, which measures the bound rather than the
-	// transport, so it is set well above what a healthy path needs and the
-	// transfer itself is bounded by the context instead.
+
 	IdleTimeout: 30 * time.Second,
-	// How many times a segment may be sent again before the connection is
-	// abandoned is a policy about dead peers, and it is measured by the
-	// transport's own tests rather than here. A benchmark on a 10% loss
-	// path needs the attempts to outlast the path's bad luck, so the
-	// ceiling is raised and the transfer's own deadline is what ends a run.
+
 	MaxRetransmits:    40,
 	RetransmitTimeout: 100 * time.Millisecond,
 }
 
-// measureRUDP offers the same payloads over NetForge's reliable UDP transport,
-// with limits large enough that the window rather than the bound is what
-// shapes the transfer.
 func measureRUDP(address string) (measurement, error) {
 	limits := benchmarkRUDPLimits
 	ctx, cancel := context.WithTimeout(context.Background(), benchmarkTransfer)
@@ -496,44 +406,26 @@ func measureRUDP(address string) (measurement, error) {
 	return got, err
 }
 
-// stream is the one shape every transport is measured through, so the three
-// rows of the comparison differ only in the transport underneath.
 type stream interface {
-	// Send offers one payload.
 	Send(payload []byte) error
-	// Receive returns the next payload that arrived. It returns a nil payload
-	// with a nil error when the path has stopped answering, which is how an
-	// unreliable transport's absence is reported.
+
 	Receive() ([]byte, error)
-	// Close ends the transfer.
+
 	Close() error
 }
 
-// runTransfer is the measurement itself: offer every payload, read back what
-// comes, and check that what comes back is what was sent. Every payload
-// carries its own index, so a payload that arrived in the wrong place or was
-// corrupted is caught rather than counted.
 func runTransfer(s stream) (measurement, error) {
 	defer func() { _ = s.Close() }()
 	got := measurement{Sent: benchmarkMessages * benchmarkSize}
 	expected := make(map[string]int, benchmarkMessages)
 	sentAt := make([]atomic.Int64, benchmarkMessages)
-	// The payloads are built before anything is sent, so the map the reader
-	// matches against is complete and the two halves of the transfer do not
-	// have to agree on who fills it.
+
 	for index := range benchmarkMessages {
 		payload := make([]byte, benchmarkSize)
 		fill(payload, index)
 		expected[string(payload)] = index
 	}
 
-	// The payloads are written while they are being read, which is what a
-	// windowed transport requires of its caller. Offering the whole transfer
-	// first and reading afterwards would not measure a slow path: every
-	// transport here bounds what it will hold, so a sender that offers more
-	// than the peer will take and never reads stalls against its own
-	// backpressure, and the stall would be reported as the transport's
-	// behaviour.
 	started := time.Now()
 	delivered, matched, answers := 0, 0, 0
 	var roundTrip time.Duration
@@ -551,10 +443,6 @@ func runTransfer(s stream) (measurement, error) {
 		writeDone <- nil
 	}()
 
-	// tally records what the transfer achieved, and is called on every way out.
-	// A transfer that stops early still reports what it managed: a row reading
-	// zero because the harness gave up says something different from one
-	// reading zero because nothing arrived.
 	tally := func(err error) (measurement, error) {
 		got.Elapsed = msSince(started)
 		got.Delivered = delivered
@@ -569,8 +457,7 @@ func runTransfer(s stream) (measurement, error) {
 	for len(expected) > 0 {
 		answered, err := s.Receive()
 		if err != nil {
-			// The writer's failure is the more useful of the two errors, since
-			// a stalled reader is usually a consequence of a refused write.
+
 			select {
 			case writeErr := <-writeDone:
 				if writeErr != nil {
@@ -581,8 +468,7 @@ func runTransfer(s stream) (measurement, error) {
 			return tally(err)
 		}
 		if len(answered) == 0 {
-			// The path has stopped answering. What is left never arrived, and
-			// a transport that does not retransmit will not deliver it.
+
 			break
 		}
 		delivered += len(answered)
@@ -591,9 +477,7 @@ func runTransfer(s stream) (measurement, error) {
 		if index, wanted := expected[key]; wanted {
 			delete(expected, key)
 			matched++
-			// The time from offering this payload to reading its answer back is
-			// one round trip over whatever the path did in between, which is
-			// what a latency figure has to be measured from.
+
 			roundTrip += time.Since(time.Unix(0, sentAt[index].Load()))
 		}
 	}
@@ -604,13 +488,6 @@ func runTransfer(s stream) (measurement, error) {
 	return tally(nil)
 }
 
-// fill writes a payload that is unique to its index: the index itself is the
-// first four bytes, and the rest is a pattern derived from it. A pattern alone
-// is not enough, because any pattern over a large enough range of indices
-// repeats, and two identical payloads would make an answer ambiguous: one
-// answer would satisfy whichever of them the reader happened to be looking for,
-// and a transfer would report itself complete while a message was still
-// missing.
 func fill(payload []byte, index int) {
 	binary.BigEndian.PutUint32(payload[:4], uint32(index))
 	for offset := 4; offset < len(payload); offset++ {
@@ -622,8 +499,6 @@ func msSince(started time.Time) float64 {
 	return float64(time.Since(started).Microseconds()) / 1000
 }
 
-// datagramStream measures a plain UDP socket. Each receive is bounded, because
-// an absent datagram is never retried and only a bound ends the wait.
 type datagramStream struct {
 	conn net.Conn
 	buf  []byte
@@ -645,7 +520,7 @@ func (s *datagramStream) Receive() ([]byte, error) {
 	if err != nil {
 		var expired net.Error
 		if errors.As(err, &expired) && expired.Timeout() {
-			// A quiet path, not a broken one: the datagram is simply gone.
+
 			return nil, nil
 		}
 		return nil, err
@@ -655,8 +530,6 @@ func (s *datagramStream) Receive() ([]byte, error) {
 
 func (s *datagramStream) Close() error { return s.conn.Close() }
 
-// streamConn measures a stream socket, where one read can return part of a
-// payload, so the stream is framed on the same index the sender wrote.
 type streamConn struct {
 	conn   net.Conn
 	buf    []byte
@@ -699,10 +572,6 @@ func (s *streamConn) Close() error {
 	return s.conn.Close()
 }
 
-// reliableStream measures the reliable transport. Its reads are bounded by the
-// connection's own idle timeout rather than by a read deadline, because the
-// transport promises that a payload sent inside the window will arrive: a
-// silent path here is a failure, not an absence.
 type reliableStream struct {
 	conn *transport.Conn
 }
@@ -715,11 +584,7 @@ func (s *reliableStream) Send(payload []byte) error {
 }
 
 func (s *reliableStream) Receive() ([]byte, error) {
-	// A read on a reliable transport is bounded by the transfer, not by the
-	// short read bound the unreliable ones use. A segment lost in transit is
-	// retransmitted after the transport's own timer, and cutting the wait
-	// shorter than that would abandon a payload the transport was going to
-	// recover, which would measure this harness rather than the transport.
+
 	ctx, cancel := context.WithTimeout(context.Background(), benchmarkTransfer)
 	defer cancel()
 	return s.conn.Read(ctx)

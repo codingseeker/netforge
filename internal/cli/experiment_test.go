@@ -6,11 +6,6 @@ import (
 	"testing"
 )
 
-// The experiment and recovery commands only read: they compile a document and
-// print a plan, or print the closed set of actions. Nothing here creates a
-// namespace or opens a socket, which is what makes it safe for a command whose
-// job is to show what a document would do before anybody runs it.
-
 func TestExperimentPlanPrintsTheLifecycle(t *testing.T) {
 	result := run(t, context.Background(), "",
 		"experiment", "plan",
@@ -21,9 +16,7 @@ func TestExperimentPlanPrintsTheLifecycle(t *testing.T) {
 	if result.err != nil {
 		t.Fatalf("Run(experiment plan) = %v, want nil", result.err)
 	}
-	// Every state of the lifecycle appears, in order, because the whole point of
-	// the command is that a reader can check the plan against the document
-	// before anything is created.
+
 	want := []string{
 		"name:",
 		"experiment_id:",
@@ -55,10 +48,7 @@ func TestExperimentPlanPrintsTheLifecycle(t *testing.T) {
 }
 
 func TestExperimentPlanNamesAnUnauthorizedRecovery(t *testing.T) {
-	// Naming an action is not consent. Without -authorize the plan must not
-	// compile, and the refusal must say why rather than quietly dropping the
-	// action: a plan that silently omitted a recovery would be read as a plan
-	// that had nothing to recover.
+
 	result := run(t, context.Background(), "",
 		"experiment", "plan",
 		"--namespace", "client",
@@ -98,8 +88,7 @@ func TestExperimentPlanAcceptsAnAuthorizedRecovery(t *testing.T) {
 	if !strings.Contains(result.stdout, "restart_service service-a") {
 		t.Errorf("stdout %q does not name the restart it would perform", result.stdout)
 	}
-	// The plan says which action runs at which step, so a reader can see that the
-	// recoveries happen after the diagnosis and before the verification.
+
 	diagnose := strings.Index(result.stdout, "diagnose")
 	recover := strings.Index(result.stdout, "remove_fault service-b")
 	verify := strings.Index(result.stdout, "verify")
@@ -130,8 +119,7 @@ func TestExperimentPlanRefusesAnOutOfScopeRecovery(t *testing.T) {
 }
 
 func TestExperimentPlanRefusesEveryProblemAtOnce(t *testing.T) {
-	// A document with two problems and an observation with two more: one run
-	// should say all four, because fixing them one run at a time is four runs.
+
 	result := run(t, context.Background(), "",
 		"experiment", "plan",
 		"--namespace", "service-z",
@@ -192,12 +180,6 @@ func TestExperimentRefusesAnUnknownSubcommand(t *testing.T) {
 	}
 }
 
-// The run subcommand shares the plan flags, and like the plan, everything about
-// a run is checked while it is compiled, before a namespace or a socket exists.
-// The refusals below are all compile-time or option-time refusals, which is what
-// makes them testable without a kernel: a bad run must be refused before it
-// would take the laboratory apart.
-
 func TestExperimentRunRefusesAnUnknownReportFormat(t *testing.T) {
 	result := run(t, context.Background(), "",
 		"experiment", "run", "--output", "yaml",
@@ -229,10 +211,7 @@ func TestExperimentRunRefusesAnEmptyLaboratory(t *testing.T) {
 }
 
 func TestExperimentRunIsRefusedBeforeTheLaboratoryExists(t *testing.T) {
-	// The observation's target is outside the network the document grants. If
-	// the run created anything before compiling, this test would be running in
-	// a place without root and would fail for the wrong reason; what the run
-	// must refuse is the plan, before any of it exists.
+
 	result := run(t, context.Background(), "",
 		"experiment", "run",
 		"--namespace", "client",
@@ -251,9 +230,7 @@ func TestExperimentRunIsRefusedBeforeTheLaboratoryExists(t *testing.T) {
 }
 
 func TestExperimentRunRefusesAnUnknownCategoryOfFlag(t *testing.T) {
-	// The observation needs a namespace and a target before the laboratory is
-	// sized, so an empty observation must be refused by the compile while the
-	// plan would still be refused for the same reason.
+
 	result := run(t, context.Background(), "",
 		"experiment", "run",
 		testdata(t, "valid-full.yaml"))
@@ -289,13 +266,12 @@ func TestRecoveryActionsPrintsTheClosedSet(t *testing.T) {
 			t.Errorf("stdout %q is missing the action %q", result.stdout, action)
 		}
 	}
-	// The chain is stated where someone reading it can see it, because the chain
-	// is the security property and not an implementation detail.
+
 	if !strings.Contains(result.stdout, "explicit authorization") ||
 		!strings.Contains(result.stdout, "verification by measurement") {
 		t.Errorf("stdout %q does not state what a recovery requires", result.stdout)
 	}
-	// Removal and restart change what is serving, and are marked as such.
+
 	if !strings.Contains(result.stdout, "destructive") {
 		t.Errorf("stdout %q does not mark the destructive actions", result.stdout)
 	}

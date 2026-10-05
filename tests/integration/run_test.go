@@ -6,15 +6,6 @@ import (
 	"testing"
 )
 
-// The tests here run the Phase 11 report end to end, through the binary: netforge
-// experiment run builds a real laboratory from a document, measures the path
-// before and after impairing it, performs the authorized repair, and writes the
-// report the phase's ten metrics describe, as JSON and as text. Nothing is
-// stubbed, so what is checked is the report a real run makes.
-
-// The laboratory identifier a Phase 11 run is pinned to. The namespaces a
-// laboratory creates are nf-<role>-<identifier>, so a document grants them
-// before the run exists and the flags name them.
 const phase11LabID = "nf-ph11"
 
 var (
@@ -24,8 +15,6 @@ var (
 	phase11Address = "10.42.0.6"
 )
 
-// writtenReport is the JSON report of a run, parsed into the parts the phase's
-// claims rest on.
 type writtenReport struct {
 	experimentID string
 	succeeded    bool
@@ -76,9 +65,6 @@ type measurementRecord struct {
 	loss float64
 }
 
-// parseReport decodes a JSON report. It consumes the fields the phase says a
-// report must carry, so a run that wrote less than that fails the parse and the
-// test with it.
 func parseReport(t *testing.T, stdout string) writtenReport {
 	t.Helper()
 	var raw map[string]any
@@ -234,9 +220,6 @@ func hasField(object map[string]any, key string) bool {
 	return ok
 }
 
-// runDocument is the document a Phase 11 run lives in: it grants the laboratory
-// the identifier above builds, and declares the packet loss the experiment
-// observes and then removes.
 func runDocument(t *testing.T, name string) string {
 	t.Helper()
 	return "name: " + name + "\n" +
@@ -256,10 +239,7 @@ func runDocument(t *testing.T, name string) string {
 		"faults:\n" +
 		"  - target: " + phase11Server + "\n" +
 		"    type: packet_loss\n" +
-		// Nine tenths, so that the impaired phase of a run is impaired on
-		// every run. The report has to carry a loss to report, and half loss
-		// measured over a handful of probes leaves a one in sixteen chance of
-		// measuring none at all.
+
 		"    value: 90%\n"
 }
 
@@ -298,8 +278,6 @@ func TestExperimentRunWritesTheReportItMeasured(t *testing.T) {
 			report.succeeded, report.cleanedUp)
 	}
 
-	// The lifecycle it walked, in the lifecycle's order, ending with the cleanup
-	// that runs last whatever the outcome.
 	if len(report.steps) == 0 || report.steps[0].state != "setup" {
 		t.Fatalf("the lifecycle starts at %q, want setup", report.steps[0].state)
 	}
@@ -308,9 +286,6 @@ func TestExperimentRunWritesTheReportItMeasured(t *testing.T) {
 			report.steps[len(report.steps)-1].state)
 	}
 
-	// The ten metrics a run reports. Each one is derived from a real
-	// measurement, so a reader can cross-check the summary against the
-	// measurements in the same report.
 	if report.metrics.packetsSent < 15 {
 		t.Errorf("packets_sent = %d, want at least the probes of three phases",
 			report.metrics.packetsSent)
@@ -335,8 +310,6 @@ func TestExperimentRunWritesTheReportItMeasured(t *testing.T) {
 		t.Errorf("the metrics count %d phases, want baseline, observe and verify", len(report.metrics.phases))
 	}
 
-	// The measurements the run kept: a healthy baseline and an observation on
-	// which the fault that was declared shows.
 	if len(report.baseline) != 1 || len(report.observed) != 1 {
 		t.Fatalf("the report holds %d baseline and %d observed measurements, want one of each",
 			len(report.baseline), len(report.observed))
@@ -346,8 +319,6 @@ func TestExperimentRunWritesTheReportItMeasured(t *testing.T) {
 			report.baseline[0].loss, report.observed[0].loss)
 	}
 
-	// The fault that was injected is in the report, and the authorized removal
-	// is recorded with the verdict of the measurement that followed it.
 	if len(report.faults) != 1 {
 		t.Fatalf("the report holds %d faults, want the one the document declared", len(report.faults))
 	}
@@ -396,11 +367,7 @@ func TestExperimentRunRefusesAnUnauthorizedRepair(t *testing.T) {
 }
 
 func TestAnExperimentRunNeverLogsASecret(t *testing.T) {
-	// A secret that happens to be in the environment must never reach the log
-	// or the report, whatever a run is told. The run below is refused before
-	// the laboratory exists, and the refusal is the part that would be most
-	// likely to echo a value back, so the assertion is that the secret stays
-	// out of the run's entire output.
+
 	const secret = "netforge-secret-9d2f1b"
 	document := writeFile(t, "phase11-secret.yaml", "name: phase11-secret\n"+
 		"scope:\n  network: 10.42.0.0/24\n  namespaces: []\n"+

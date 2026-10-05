@@ -10,9 +10,6 @@ import (
 	"github.com/netforge/netforge/internal/namespace"
 )
 
-// The compiled-in ceilings. A configuration may lower every limit but may
-// never raise one past these values, so a limit cannot be used to widen the
-// blast radius of a fault.
 const (
 	CeilingFaults    = 64
 	CeilingDuration  = 24 * time.Hour
@@ -22,28 +19,22 @@ const (
 	CeilingGap       = 65_535
 )
 
-// Limits bound what the engine is allowed to do.
 type Limits struct {
-	// MaxFaults is the number of faults that may be active at once.
 	MaxFaults int `json:"max_faults"`
-	// MaxDuration is the longest lifetime a single fault may request.
+
 	MaxDuration time.Duration `json:"max_duration"`
-	// MaxLatency is the largest delay a fault may add.
+
 	MaxLatency time.Duration `json:"max_latency"`
-	// MaxBandwidth is the largest rate ceiling a fault may request, in bits
-	// per second.
+
 	MaxBandwidth uint64 `json:"max_bandwidth"`
-	// MaxQueue is the largest netem queue depth a fault may request.
+
 	MaxQueue int `json:"max_queue"`
-	// MaxGap is the largest reorder gap a fault may request.
+
 	MaxGap int `json:"max_gap"`
-	// DefaultQueue is the netem queue depth used when a fault does not set one.
+
 	DefaultQueue int `json:"default_queue"`
 }
 
-// DefaultLimits returns the limits used when a laboratory does not configure
-// any. They are deliberately small: a laboratory is a test fixture, not a
-// traffic generator.
 func DefaultLimits() Limits {
 	return Limits{
 		MaxFaults:    16,
@@ -56,7 +47,6 @@ func DefaultLimits() Limits {
 	}
 }
 
-// WithDefaults fills in every unset limit.
 func (l Limits) WithDefaults() Limits {
 	defaults := DefaultLimits()
 	if l.MaxFaults == 0 {
@@ -83,8 +73,6 @@ func (l Limits) WithDefaults() Limits {
 	return l
 }
 
-// check rejects limits that are missing, negative, or above a ceiling, and
-// repairs the values that must be consistent with each other.
 func (l Limits) check() (Limits, error) {
 	const op = "chaos.Limits.check"
 	l = l.WithDefaults()
@@ -140,17 +128,12 @@ func (l Limits) check() (Limits, error) {
 	return l, nil
 }
 
-// Scope is the set of namespaces and the prefix an engine may touch. A target
-// outside the scope is refused before any command runs, which is what keeps
-// fault injection away from the host network.
 type Scope struct {
-	// Network is the laboratory prefix the engine serves.
 	Network netip.Prefix `json:"network"`
-	// Namespaces are the laboratory namespaces an engine may touch.
+
 	Namespaces []string `json:"namespaces"`
 }
 
-// check validates the scope itself.
 func (s Scope) check() error {
 	const op = "chaos.Scope.check"
 	if !s.Network.IsValid() || !s.Network.Addr().Is4() {
@@ -172,7 +155,6 @@ func (s Scope) check() error {
 	return nil
 }
 
-// allows reports whether a namespace is inside the scope.
 func (s Scope) allows(namespace string) bool {
 	for _, name := range s.Namespaces {
 		if name == namespace {
@@ -182,15 +164,8 @@ func (s Scope) allows(namespace string) bool {
 	return false
 }
 
-// laboratoryPrefix is the prefix every laboratory namespace carries. Requiring
-// it is what makes a host namespace impossible to put in scope: "host" and the
-// namespaces of the host's own workloads do not carry it, so a scope can only
-// ever name namespaces the laboratory created for itself.
 const laboratoryPrefix = "nf-"
 
-// checkNamespaceName validates a laboratory namespace name. The namespace
-// layer owns the naming rules, so its validator is used rather than a second,
-// looser copy, and the laboratory prefix is required on top of them.
 func checkNamespaceName(op, name string) error {
 	if err := namespace.ValidateName(op, "namespace", name); err != nil {
 		return apperr.Validation(op, "a scope entry must be a laboratory namespace name", err)

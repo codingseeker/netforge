@@ -3639,3 +3639,200 @@ experiment identifier, and no engine consumes it. A fault NetForge applies is th
 fault the document declared, so there is nothing random left to seed today; a
 component that gained a random choice would have to read this value rather than
 call a random source, and nothing here claims that has been done.
+
+---
+
+# Phase 16 — The Load Balancer in the Path
+
+Evidence: `internal/loadbalancer` is a complete, bounded, tested component that
+no process can start and no laboratory can own. `cmd/netforge/main.go` dispatches
+the namespace, router, service and probe agents and not the balancer, so
+`loadbalancer.Dispatch` has no non-test caller, and `network.Spec` has no
+balancer field at all. The consequence is larger than a missing flag.
+
+`netforge recovery actions` prints seven actions, and four of them are dead. The
+environment builds its recovery agent with a nil backend controller
+(`internal/experiment/environment.go:79`), so `internal/recovery/lab.go:149`
+refuses `remove_backend`, `restore_backend`, `drain_connection` and
+`re_enable_backend` with "this experiment has no load balancer". A command line
+that advertises an action which can never run is the same defect Phase 14 found in
+a report that described a router that never ran, and it is the reason this phase
+exists rather than a feature request.
+
+The balancer is also the only component that dials the reliable UDP transport
+(`internal/loadbalancer/health.go:56`), so making it reachable is also what makes
+Phase 17's transport a path the product depends on rather than a component a test
+exercises.
+
+## Requirements
+
+- [ ] a laboratory can be built with a load balancer in its forwarding path, and
+  the balancer is a process of that laboratory like the router and the services —
+  started through the agent, awaited until it reports running, and stopped before
+  the namespaces it lives in disappear;
+- [ ] a balancer is reachable from the command line, with its own count and base
+  port, validated against the plan the laboratory would be built from before any
+  namespace exists;
+- [ ] the four backend actions run against a real balancer: an authorized
+  `remove_backend` changes that backend's reported state while traffic continues
+  on the survivors, and a `restore_backend` brings it back;
+- [ ] the balancer's health check distinguishes a backend that answered a
+  versioned challenge from one whose socket merely accepted bytes;
+- [ ] `netforge recovery actions` no longer prints an action that cannot run,
+  and asking for a backend action with no balancer is refused naming the field;
+- [ ] the run's report says what the balancer was doing: its backends, their
+  states, and how many exchanges it has carried;
+- [ ] the whole suite passes, twice under the race detector, and `make cover`.
+
+## Design notes
+
+The balancer is wired the way the software router and the services already are,
+not by a path of its own: a `network.BalancerSpec` beside `ServiceSpec`, a
+`startBalancer` beside `startRouter`, a `netforge-balancer` mode in the dispatch
+chain, and an await loop over `loadbalancer.ReadStatus`. Its namespace is
+registered in the laboratory's own space map, because the probe scope check and
+`Lab.Names` both read that map and a balancer the laboratory cannot see is a
+balancer nothing can measure.
+
+The four backend actions need one more thing before they can run, and it is
+mechanical rather than structural: `recovery.resolveFrom` requires `From` for any
+action aimed at an address, and the CLI never sets it. A `-recover-from` flag, or
+deriving it from `--namespace`, is what turns "the target is an address" from a
+refusal into an authorized action with a verification probe.
+
+`TestProcessBoundaryIsMinimal` is a negative test and will fail the first time a
+file is added to the process boundary. That failure is the test working: it means
+a file claimed a capability and has to actually use it. Expect it, and use it.
+
+**STOP.**
+
+---
+
+# Phase 17 — The Reliable Transport as a Depended-On Path
+
+Evidence: section 7 of this document requires a reliable UDP transport and the
+component exists, is bounded on both directions, and is measured end to end under
+loss, latency and jitter. It is a component *under test* and not a component
+*depended on*. Every non-test `transport.Dial` call site in the tree is inside
+`internal/loadbalancer`, and the balancer is unreachable until Phase 16.
+
+The server side is an echo and nothing more: `listenReliable` opens a listener and
+`serveEchoReliable` writes back the payload it read. Nothing in the repository
+sets `ServiceSpec.RUDPPort` outside a test, and `probe.Protocols()` is a closed
+set of six with no reliable member, so no probe can measure over the transport
+that this project was built around.
+
+One symptom is already visible in the product's own output.
+`metrics.Retransmissions` is declared, rendered in both report formats, and
+required by section 16 as one of ten metrics — and is never assigned anywhere in
+non-test code. It is documented as always zero, which is true for echo
+measurements and false for the one protocol with a transport that retransmits.
+
+## Requirements
+
+- [ ] a probe can measure over the reliable transport: `--protocol rudp` is a
+  protocol, it is served by a laboratory service, and a run using it reports the
+  transport's own counters rather than a parse of a tool's output;
+- [ ] a run under a declared `packet_loss` fault reports loss on `--protocol udp`
+  and none on `--protocol rudp` over the same path, which is the claim the
+  transport has never been asked to support by the product;
+- [ ] `metrics.Retransmissions` is populated from the transport's own counters,
+  is non-zero under loss, is zero at zero loss, and stops being documented as
+  permanently zero;
+- [ ] the balancer's health check answers a versioned challenge, so a backend is
+  healthy because it identified itself rather than because its socket accepted a
+  datagram;
+- [ ] the reliable transport's limits are reported in the run's report, because a
+  window figure without its limits is irreproducible;
+- [ ] the whole suite passes, twice under the race detector, and `make cover`.
+
+## Design notes
+
+`probe.Protocol` gaining a member is the whole of the measurement path, and it
+has to be added in three places that are each a closed set: `Protocols()`,
+`Request.check`, and the agent's dispatch switch. `investigator.chain` needs a
+rung for it too, or a diagnosis of a reliable path would stop at the layer below
+and never test the layer the operator named.
+
+The retransmission metric is read from the connection the probe already holds
+rather than recomputed, for the same reason every other metric in that package is
+derived from evidence and never from a configured value. A number that came from
+the limit instead of the wire would be a number that cannot be wrong, which is not
+what a metric is for.
+
+Deleting the known-limitation bullet is part of the requirement rather than a
+follow-up. A limitation that has been closed and is still written down is worse
+than one that was never removed, because a reader cannot tell which it is.
+
+**STOP.**
+
+---
+
+# Phase 18 — What the Operator Can See, and What the Suite Proves
+
+Evidence: two capabilities are computed and never shown, one contract section is
+two-sevenths implemented, and four named test defects would let a regression pass.
+None of this adds a capability. It is the difference between a tool that works
+and one an operator can verify, which is what the remaining sections of this
+document actually ask for.
+
+`experiment.Report.Recommendation` is assigned in the controller and read by
+nothing: neither `EncodeText` nor `EncodeJSON` carries it, and the `report.Report`
+struct has no field for it. The recommendation is the one part of a report that
+tells an operator what to type next, and `recovery.Recommendation` already carries
+the action, the target, the reason and a `Requested(from)` rendering of the flag
+that would perform it. A reader who never sees it cannot use it.
+
+The observability contract requires a traceable chain from experiment to
+verification, and a `--log-level=debug` run of a real faulted experiment emits
+three records: a dispatch, one terminal line, and a failure. Fault injection,
+probing, diagnosis, recovery and verification produce nothing, because nothing
+in `network`, `chaos`, `probe`, `investigator`, `recovery`, `loadbalancer` or
+`transport` logs at all. The field names are correct and consistent; the coverage
+of stages is not.
+
+Three defects found while auditing, kept as tests:
+
+- `reconcile.Limits.MaxEntries` is declared, defaulted and ceiling-checked, and
+  no caller reads it. `Scan` reads the whole state root, so a shared temporary
+  directory with a million entries is enumerated in full. This is Phase 15's own
+  code and Phase 15's own omission.
+- `internal/cli/app.go` passes an explicit `event` field on a record whose
+  `Message` is already rewritten to `event`, so a JSON log line carries the key
+  `event` twice with different values and resolves to the wrong one.
+- `tests/integration/phase15_test.go` skips when a live run does not create its
+  state directory inside a deadline, inside the one test whose entire claim is
+  that a live run's state is refused. A regression that stops the run creating
+  state at all turns the safety property into a skip.
+
+## Requirements
+
+- [ ] both report formats carry the recommendation; a run that diagnosed nothing
+  says so explicitly rather than omitting the key, and the rendered
+  recommendation round-trips into `-recover` and compiles;
+- [ ] every stage of the lifecycle emits at least one log record carrying the
+  experiment identifier and a distinct event name, checked by decoding each
+  record rather than by matching text, and exactly one `event` key per record;
+- [ ] one run's records, joined, name every namespace it created, every fault it
+  applied and removed, the diagnosis and each authorized action — the
+  reconstruction claim of the observability contract, as a golden trace;
+- [ ] the reconciler bounds what one listing reads, and a state root larger than
+  the bound is refused rather than enumerated;
+- [ ] the vacuous and sleep-and-hope assertions named by the audit are replaced
+  with the event they should await, and the skip on a failure-shaped condition
+  becomes a failure;
+- [ ] the whole suite passes, twice under the race detector, and `make cover`.
+
+## Design notes
+
+The event vocabulary is a closed set, and that is the point: a log line whose
+event name is a format string is a log line nobody can assert on. Each stage gets
+a fixed name, and the test unmarshals each record and compares the name, because
+`strings.Contains` on stderr cannot tell one event from another and is how the
+duplicate `event` key went unnoticed.
+
+The golden trace is a test that reads like the contract it enforces. If the
+lifecycle gains a stage, the trace names it or fails, which is what makes the
+observability section a requirement rather than an aspiration.
+
+**STOP.**

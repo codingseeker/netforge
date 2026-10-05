@@ -10,21 +10,12 @@ import (
 	"github.com/netforge/netforge/internal/namespace"
 )
 
-// Scope is the part of the world a laboratory is allowed to look at. A probe
-// is refused unless both the namespace it runs in and the address it aims at
-// are inside the scope, so a mistake in a request cannot reach a host
-// interface, a host address or a namespace the laboratory does not own.
-//
-// A scope that names nothing grants nothing.
 type Scope struct {
-	// Network is the network the laboratory may address.
 	Network netip.Prefix `json:"network"`
-	// Namespaces are the namespaces the laboratory may run in.
+
 	Namespaces []string `json:"namespaces"`
 }
 
-// NewScope builds a scope. The network and every name are validated, so a
-// scope that exists is a scope that can be enforced.
 func NewScope(network netip.Prefix, namespaces []string) (Scope, error) {
 	const op = "probe.NewScope"
 	if !network.IsValid() {
@@ -56,13 +47,8 @@ func NewScope(network netip.Prefix, namespaces []string) (Scope, error) {
 	return Scope{Network: network, Namespaces: seen}, nil
 }
 
-// Check refuses an operation whose namespace or target is outside the scope.
-// It is exported so the laboratory can apply the same rule to the services it
-// starts, which is what stops a service being started in a namespace the
-// laboratory does not own.
 func (s Scope) Check(op, namespace, target string) error { return s.check(op, namespace, target) }
 
-// check refuses a probe whose namespace or target is outside the scope.
 func (s Scope) check(op, namespace, target string) error {
 	if !s.Network.IsValid() || len(s.Namespaces) == 0 {
 		return apperr.Permission(op, "the probe has no scope to be checked against", nil)
@@ -83,15 +69,10 @@ func (s Scope) check(op, namespace, target string) error {
 	return nil
 }
 
-// Contains reports whether an address is inside the scope network. It is used
-// by callers that want to check an address without running a probe.
 func (s Scope) Contains(address netip.Addr) bool {
 	return s.Network.IsValid() && s.Network.Contains(address)
 }
 
-// checkName validates a namespace name, so a scope cannot name something the
-// laboratory could never create. The length bound is the namespace layer's,
-// which is the authority on what a namespace may be called.
 func checkName(op, name string) error {
 	if name == "" {
 		return apperr.InvalidArgument(op, "a namespace name cannot be empty", nil)

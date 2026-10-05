@@ -1,10 +1,3 @@
-// Package chaos injects controlled network faults into an isolated laboratory.
-//
-// The package is deliberately free of process execution: it builds validated
-// argument vectors and interprets kernel state reported back by the namespace
-// layer. Every fault is scoped to a laboratory namespace, bounded by limits,
-// verified against the kernel after it is applied, and removed again when it
-// expires, when the engine is closed, or when the laboratory is destroyed.
 package chaos
 
 import (
@@ -20,11 +13,8 @@ import (
 	"github.com/netforge/netforge/internal/namespace"
 )
 
-// Kind identifies a supported fault. The set is closed: an unknown kind is a
-// validation error rather than a silently ignored field.
 type Kind string
 
-// The supported fault kinds.
 const (
 	KindLatency     Kind = "latency"
 	KindJitter      Kind = "jitter"
@@ -43,14 +33,12 @@ var kinds = [...]Kind{
 	KindReordering,
 }
 
-// Kinds returns every supported fault kind.
 func Kinds() []Kind {
 	out := make([]Kind, len(kinds))
 	copy(out, kinds[:])
 	return out
 }
 
-// Valid reports whether the kind is one of the supported faults.
 func (k Kind) Valid() bool {
 	for _, known := range kinds {
 		if k == known {
@@ -62,20 +50,16 @@ func (k Kind) Valid() bool {
 
 func (k Kind) String() string { return string(k) }
 
-// Direction selects the side of the link that carries the impairment queue.
 type Direction string
 
-// The supported directions.
 const (
-	// DirectionOut shapes traffic leaving the target.
 	DirectionOut Direction = "out"
-	// DirectionIn shapes traffic arriving at the target, which leaves the peer.
+
 	DirectionIn Direction = "in"
 )
 
 var directions = [...]Direction{DirectionOut, DirectionIn}
 
-// Valid reports whether the direction is supported.
 func (d Direction) Valid() bool {
 	for _, known := range directions {
 		if d == known {
@@ -87,39 +71,30 @@ func (d Direction) Valid() bool {
 
 func (d Direction) String() string { return string(d) }
 
-// Status is the lifecycle state of a fault.
 type Status string
 
-// The fault lifecycle states.
 const (
-	// StatusPending means the specification was accepted but not yet applied.
 	StatusPending Status = "pending"
-	// StatusActive means the kernel reports the fault on the device.
+
 	StatusActive Status = "active"
-	// StatusExpired means the duration elapsed and the fault was removed.
+
 	StatusExpired Status = "expired"
-	// StatusRemoved means the fault was removed before it expired.
+
 	StatusRemoved Status = "removed"
-	// StatusFailed means the fault could not be applied or removed.
+
 	StatusFailed Status = "failed"
 )
 
-// Finished reports whether the fault is no longer present in the kernel.
 func (s Status) Finished() bool {
 	return s == StatusExpired || s == StatusRemoved || s == StatusFailed
 }
 
 func (s Status) String() string { return string(s) }
 
-// Percent is a probability on a scale of 0 to 100.
 type Percent float64
 
-// Fraction returns the probability on a scale of 0 to 1.
 func (p Percent) Fraction() float64 { return float64(p) / 100 }
 
-// Valid reports whether the percentage can be handed to the kernel. Zero is
-// rejected on purpose: a fault that provably does nothing is reported as a
-// fault would be a lie, and the kernel silently accepts a 0% loss qdisc.
 func (p Percent) Valid() bool {
 	value := float64(p)
 	return !math.IsNaN(value) && !math.IsInf(value, 0) && p > 0 && p <= 100
@@ -129,21 +104,16 @@ func (p Percent) String() string {
 	return strconv.FormatFloat(float64(p), 'f', -1, 64) + "%"
 }
 
-// Duration is a time span that is reported as a duration string rather than as
-// a bare nanosecond count, so a fault record stays readable.
 type Duration time.Duration
 
-// Std returns the duration as a time.Duration.
 func (d Duration) Std() time.Duration { return time.Duration(d) }
 
 func (d Duration) String() string { return time.Duration(d).String() }
 
-// MarshalJSON encodes the duration as a string.
 func (d Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(time.Duration(d).String())
 }
 
-// UnmarshalJSON accepts a duration string or a nanosecond count.
 func (d *Duration) UnmarshalJSON(data []byte) error {
 	var text string
 	if err := json.Unmarshal(data, &text); err == nil {
@@ -162,35 +132,30 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Parameters are the configured values of a fault. They are what the caller
-// asked for; they are never presented as an observation of the network.
 type Parameters struct {
-	// Latency is the deterministic delay added to a packet.
 	Latency Duration `json:"latency,omitempty"`
-	// Jitter is the random variation around Latency.
+
 	Jitter Duration `json:"jitter,omitempty"`
-	// Correlation couples consecutive packets, on a scale of 0 to 100.
+
 	Correlation Percent `json:"correlation,omitempty"`
-	// Loss is the percentage of packets dropped.
+
 	Loss Percent `json:"loss,omitempty"`
-	// Duplication is the percentage of packets duplicated.
+
 	Duplication Percent `json:"duplication,omitempty"`
-	// Reordering is the percentage of packets sent out of order.
+
 	Reordering Percent `json:"reordering,omitempty"`
-	// Gap is the distance in packets between reordered packets.
+
 	Gap int `json:"gap,omitempty"`
-	// Rate is the bandwidth ceiling in bits per second.
+
 	Rate uint64 `json:"rate,omitempty"`
-	// Queue is the netem queue depth in packets.
+
 	Queue int `json:"queue,omitempty"`
 }
 
-// empty reports whether no parameter is set at all.
 func (p Parameters) empty() bool {
 	return p == Parameters{}
 }
 
-// Endpoint is one end of an impaired link.
 type Endpoint struct {
 	Namespace string `json:"namespace"`
 	Interface string `json:"interface"`
@@ -198,35 +163,27 @@ type Endpoint struct {
 
 func (e Endpoint) String() string { return e.Namespace + "/" + e.Interface }
 
-// valid reports whether both halves of the endpoint are well formed.
 func (e Endpoint) valid() bool {
 	return namespace.ValidateName("chaos", "namespace", e.Namespace) == nil &&
 		iface.ValidateName("chaos", "interface", e.Interface) == nil
 }
 
-// Spec is a validated request for a fault. It carries no state: the engine
-// turns a specification into a Fault record once the kernel agrees.
 type Spec struct {
-	// ID names the fault. When empty the engine derives a stable identifier.
 	ID string `json:"id,omitempty"`
-	// Target is the laboratory namespace that feels the fault.
+
 	Target string `json:"target"`
-	// Interface is the target data interface. When empty the engine resolves
-	// the single data interface of the namespace.
+
 	Interface string `json:"interface,omitempty"`
-	// Direction selects which side of the link is impaired.
+
 	Direction Direction `json:"direction,omitempty"`
-	// Kind is the fault to inject.
+
 	Kind Kind `json:"type"`
-	// Parameters are the configured values of the fault.
+
 	Parameters Parameters `json:"parameters"`
-	// Duration bounds how long the fault may live. When zero the engine uses
-	// the maximum duration of the limits.
+
 	Duration Duration `json:"duration,omitempty"`
 }
 
-// Observed is the state the kernel reported back after a fault was applied. It
-// is evidence, kept separate from the configured Parameters on purpose.
 type Observed struct {
 	Kind        string   `json:"kind"`
 	Handle      string   `json:"handle"`
@@ -242,9 +199,6 @@ type Observed struct {
 	Burst       uint64   `json:"burst,omitempty"`
 }
 
-// Fault is the record of an injected fault. The field names are part of the
-// contract: fault_id, experiment_id, source, destination, start_time,
-// duration, parameters and status are always present.
 type Fault struct {
 	ID          string     `json:"fault_id"`
 	Experiment  string     `json:"experiment_id"`
@@ -264,17 +218,8 @@ type Fault struct {
 	Reason      string     `json:"reason,omitempty"`
 }
 
-// Active reports whether the fault is currently expected in the kernel.
 func (f Fault) Active() bool { return f.Status == StatusActive }
 
-// Validate checks a specification against limits and returns it with its
-// defaults filled in. It never touches the kernel and never touches the
-// laboratory, so a rejected specification has no effect anywhere.
-//
-// This is the same check the engine applies before it installs anything. Code
-// that turns a request into a specification, such as the configuration
-// reader, validates through here rather than repeating the rules, so a
-// specification that passes can never be refused at the moment it is applied.
 func (s Spec) Validate(l Limits) (Spec, error) {
 	checked, err := l.check()
 	if err != nil {
@@ -283,9 +228,6 @@ func (s Spec) Validate(l Limits) (Spec, error) {
 	return s.check(checked)
 }
 
-// check validates a specification and fills in the defaults. It never touches
-// the kernel and never touches the laboratory, so a rejected specification has
-// no effect anywhere.
 func (s Spec) check(l Limits) (Spec, error) {
 	const op = "chaos.Spec.check"
 
@@ -330,8 +272,6 @@ func (s Spec) check(l Limits) (Spec, error) {
 	return s, nil
 }
 
-// checkParameters enforces the parameters that belong to the chosen kind and
-// rejects the ones that do not, so a mislabelled fault cannot reach the kernel.
 func (s *Spec) checkParameters(l Limits) error {
 	const op = "chaos.Spec.check"
 	p := &s.Parameters
@@ -489,7 +429,6 @@ func (s *Spec) checkParameters(l Limits) error {
 	return apperr.Internal(op, fmt.Sprintf("fault kind %q has no parameter rules", s.Kind), nil)
 }
 
-// Rate is a bandwidth in bits per second that prints with a unit suffix.
 type Rate uint64
 
 func (r Rate) String() string { return strconv.FormatUint(uint64(r), 10) + "bit" }

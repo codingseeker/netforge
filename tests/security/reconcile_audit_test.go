@@ -1,10 +1,3 @@
-// This file holds the Phase 15 security audit. The reconciler is the only part
-// of NetForge that deletes anything, and it deletes inside a directory shared
-// with every other program on the host, so its whole safety argument is one
-// question: can it be made to remove something that is not NetForge's?
-//
-// Every test here attacks that question directly rather than checking that the
-// code looks careful.
 package security
 
 import (
@@ -34,8 +27,6 @@ func auditCreate(t *testing.T, root string, kind reconcile.Kind) string {
 	return path
 }
 
-// deadOwner rewrites a marker to name a process that is not running, which is
-// the only state in which a removal is ever correct.
 func deadOwner(t *testing.T, path string) {
 	t.Helper()
 	marker, err := reconcile.ReadMarker(path)
@@ -73,23 +64,15 @@ func auditAuthorize(t *testing.T, root string, names ...string) reconcile.Author
 	return authorization
 }
 
-// TestTheReconcilerRemovesNothingItCannotProveOwns is the audit's central claim,
-// tested the only way that means anything: by putting things in the state root
-// that a naive reconciler would remove, and demanding that every one survives.
-//
-// A directory whose name is exactly what NetForge generates is the hardest case,
-// because the name alone cannot be distinguished from ours. Only the marker can,
-// and only the marker's absence is decisive.
 func TestTheReconcilerRemovesNothingItCannotProveOwns(t *testing.T) {
 	root := auditRoot(t)
 	outside := auditRoot(t)
 
-	// A bystander outside the state root, to catch a removal that escapes it.
 	bystander := filepath.Join(outside, "a-file-of-someone-elses.txt")
 	if err := os.WriteFile(bystander, []byte("not ours"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// A bystander inside it, carrying a name NetForge would have generated.
+
 	impostor := filepath.Join(root, "netforge-lab-000000000000")
 	if err := os.Mkdir(impostor, 0o700); err != nil {
 		t.Fatal(err)
@@ -98,9 +81,7 @@ func TestTheReconcilerRemovesNothingItCannotProveOwns(t *testing.T) {
 	if err := os.WriteFile(impostorFile, []byte("also not ours"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// A symlink carrying a generated name. Following it would take a removal
-	// somewhere the name does not say, which is the one way a reconciler over a
-	// shared directory becomes an arbitrary delete.
+
 	target := auditRoot(t)
 	targetFile := filepath.Join(target, "symlinked.txt")
 	if err := os.WriteFile(targetFile, []byte("behind a symlink"), 0o600); err != nil {
@@ -110,13 +91,12 @@ func TestTheReconcilerRemovesNothingItCannotProveOwns(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlinks are unavailable here: %v", err)
 	}
-	// A file, not a directory, carrying a generated name.
+
 	file := filepath.Join(root, "netforge-lab-222222222222")
 	if err := os.WriteFile(file, []byte("a file"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// A directory with a marker that is not a marker, and one with a marker
-	// claiming to belong somewhere else.
+
 	garbage := filepath.Join(root, "netforge-lab-333333333333")
 	if err := os.Mkdir(garbage, 0o700); err != nil {
 		t.Fatal(err)
@@ -138,8 +118,6 @@ func TestTheReconcilerRemovesNothingItCannotProveOwns(t *testing.T) {
 	}
 	deadOwner(t, genuine)
 
-	// Everything above is authorized for removal. The audit's claim is that the
-	// authorization is not what makes a removal happen — ownership is.
 	names := []string{
 		filepath.Base(impostor),
 		filepath.Base(link),
@@ -159,15 +137,13 @@ func TestTheReconcilerRemovesNothingItCannotProveOwns(t *testing.T) {
 		t.Errorf("refused %d, want 5: the impostor, the symlink, the file, the garbage marker and the copied marker",
 			report.Refused)
 	}
-	// Every refusal is explained, because a silent refusal is indistinguishable
-	// from a bug and an operator cannot act on either.
+
 	for _, outcome := range report.Refusals() {
 		if !strings.HasPrefix(outcome.Reason, "refused:") || len(outcome.Reason) < 20 {
 			t.Errorf("the refusal %q does not say why", outcome.Reason)
 		}
 	}
 
-	// Now the proof, as files on disk.
 	for _, path := range []string{impostorFile, targetFile, file, bystander} {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("the reconciler removed %q, which it never proved was NetForge's", path)
@@ -186,19 +162,13 @@ func TestTheReconcilerRemovesNothingItCannotProveOwns(t *testing.T) {
 	}
 }
 
-// TestOwnershipCannotBeForgedByWritingTheMarker is the harder half of the same
-// question. An attacker who can write into the state root could write a marker
-// that looks right. The audit does not claim that is impossible — a process that
-// can write there can write there — but it does claim what a forger would also
-// have to do, and that the forger's marker is at least a marker of a dead owner.
 func TestOwnershipCannotBeForgedByWritingTheMarker(t *testing.T) {
 	root := auditRoot(t)
 	forged := filepath.Join(root, "netforge-lab-555555555555")
 	if err := os.Mkdir(forged, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// A marker naming this audit's own process: a forger who does not know the
-	// owner cannot get the in-use check to pass, and the reclaim refuses.
+
 	marker := reconcile.Marker{
 		Version:   reconcile.MarkerVersion,
 		Kind:      reconcile.KindLaboratory,
@@ -223,9 +193,6 @@ func TestOwnershipCannotBeForgedByWritingTheMarker(t *testing.T) {
 	}
 }
 
-// TestTheReconcilerIsConfinedToItsStateRoot proves the confinement in both
-// directions: a request cannot carry a path, and an authorization issued for one
-// root cannot be spent on another.
 func TestTheReconcilerIsConfinedToItsStateRoot(t *testing.T) {
 	ours := auditRoot(t)
 	theirs := auditRoot(t)
@@ -233,8 +200,7 @@ func TestTheReconcilerIsConfinedToItsStateRoot(t *testing.T) {
 	if err := os.Mkdir(victim, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// There is nothing in our own root, so an authorization for it names a
-	// directory that does not exist. Spending it elsewhere must still fail.
+
 	authorization := auditAuthorize(t, ours, filepath.Base(victim))
 	if _, err := reconcile.Reclaim(context.Background(), theirs, authorization, time.Now()); err == nil {
 		t.Fatal("an authorization was spent against a different state root")
@@ -246,12 +212,9 @@ func TestTheReconcilerIsConfinedToItsStateRoot(t *testing.T) {
 	}
 }
 
-// TestAMarkerIsWrittenWholeOrNotAtAll is the reason an untrusted marker is not
-// ownership. A marker left half-written by a killed process must be refused, not
-// partially believed.
 func TestAMarkerIsWrittenWholeOrNotAtAll(t *testing.T) {
 	root := auditRoot(t)
-	// A truncated marker: the beginning of a valid document and nothing else.
+
 	partial := filepath.Join(root, "netforge-lab-777777777777")
 	if err := os.Mkdir(partial, 0o700); err != nil {
 		t.Fatal(err)
@@ -270,8 +233,7 @@ func TestAMarkerIsWrittenWholeOrNotAtAll(t *testing.T) {
 	if len(entries) != 1 || entries[0].Identified {
 		t.Errorf("a truncated marker was identified: %+v", entries)
 	}
-	// A temporary marker left by a process killed mid-write is not a directory
-	// NetForge generates, so it is not a candidate either.
+
 	scratch := filepath.Join(root, reconcile.MarkerFile+".123456.tmp")
 	if err := os.WriteFile(scratch, []byte(whole), 0o600); err != nil {
 		t.Fatal(err)
@@ -285,20 +247,12 @@ func TestAMarkerIsWrittenWholeOrNotAtAll(t *testing.T) {
 	}
 }
 
-// TestTheReconcilerCannotReachTheHostNetwork is the property that makes it safe
-// to run unprivileged. It removes files and nothing else, so there is no code path
-// from an authorization to a namespace, a link, a route or a qdisc rule.
 func TestTheReconcilerCannotReachTheHostNetwork(t *testing.T) {
-	// The package's own imports are the proof. A reconciler that could name a
-	// link would have to import something that can, and the security suite holds
-	// that boundary elsewhere; here the check is that reconciliation is confined
-	// to the state root by construction.
+
 	root := auditRoot(t)
 	path := auditCreate(t, root, reconcile.KindRouter)
 	deadOwner(t, path)
-	// A directory holding a file that is not state. Removing the directory
-	// removes the file with it, which is the point: the reconciler's blast radius
-	// is one directory it proved it made.
+
 	inside := filepath.Join(path, "router.json")
 	if err := os.WriteFile(inside, []byte(`{"state":"running"}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -310,7 +264,7 @@ func TestTheReconcilerCannotReachTheHostNetwork(t *testing.T) {
 	if _, err := os.Stat(inside); err == nil {
 		t.Error("the reclaim did not remove the directory it was authorized for")
 	}
-	// It created nothing: a reconciler is not allowed to leave state behind.
+
 	entries, err := reconcile.Scan(root, time.Now())
 	if err != nil {
 		t.Fatal(err)

@@ -5,9 +5,6 @@ import (
 	"time"
 )
 
-// A configuration that leaves a limit out must get a working one, because a
-// transport that refuses to start unless every number is set is one nobody
-// starts.
 func TestUnsetLimitsFallBackToWorkingOnes(t *testing.T) {
 	t.Parallel()
 	checked, err := Limits{}.Validate()
@@ -20,8 +17,6 @@ func TestUnsetLimitsFallBackToWorkingOnes(t *testing.T) {
 	}
 }
 
-// Every limit a peer could push on has to be bounded, and a configuration that
-// would make one unbounded has to be refused before a connection exists.
 func TestLimitsThatWouldBreakTheTransportAreRefused(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -46,9 +41,6 @@ func TestLimitsThatWouldBreakTheTransportAreRefused(t *testing.T) {
 	}
 }
 
-// The fallback is only applied to a limit that was left out. A limit that was
-// given is used as given, or refused, never quietly replaced: a caller that set
-// a small window has to get a small window.
 func TestAGivenLimitIsNotReplacedByTheDefault(t *testing.T) {
 	t.Parallel()
 	checked, err := Limits{MaxWindow: 4, MaxReorder: 3, MaxPayload: 128}.Validate()
@@ -66,10 +58,6 @@ func TestAGivenLimitIsNotReplacedByTheDefault(t *testing.T) {
 	}
 }
 
-// The defaults are the numbers the rest of the transport is reasoned about, and
-// they are derived from the frame ceiling rather than chosen next to it, so a
-// change to the frame cannot leave the defaults describing a frame that no
-// longer exists.
 func TestTheDefaultsMatchTheFrame(t *testing.T) {
 	t.Parallel()
 	checked, err := DefaultLimits().Validate()
@@ -82,8 +70,7 @@ func TestTheDefaultsMatchTheFrame(t *testing.T) {
 	if checked.MaxPayload != MaxPayloadSize {
 		t.Errorf("MaxPayload = %d, want %d", checked.MaxPayload, MaxPayloadSize)
 	}
-	// The round trip ceiling has to be able to hold a derived timeout, or a
-	// measured path would be clamped by the ceiling on every send.
+
 	if checked.MaxRTT < checked.RetransmitTimeout {
 		t.Errorf("MaxRTT = %s, want it above the retransmission timeout of %s",
 			checked.MaxRTT, checked.RetransmitTimeout)
@@ -92,8 +79,7 @@ func TestTheDefaultsMatchTheFrame(t *testing.T) {
 		t.Errorf("HandshakeTimeout = %s, want it above one retransmission of %s",
 			checked.HandshakeTimeout, checked.RetransmitTimeout)
 	}
-	// An idle timeout shorter than a handshake would close a connection that was
-	// still being established.
+
 	if checked.IdleTimeout < checked.HandshakeTimeout {
 		t.Errorf("IdleTimeout = %s, want it above the handshake of %s",
 			checked.IdleTimeout, checked.HandshakeTimeout)

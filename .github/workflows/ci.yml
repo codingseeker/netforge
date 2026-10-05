@@ -73,10 +73,6 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
 
-      # A suite that passes once may still be flaky, and a test that passes by
-      # luck makes every other gate untrustworthy. The whole tree runs end to end
-      # three times: this is what found the two flaky tests Phase 12 recorded, so
-      # it is a gate and not a nicety.
       - name: Run the whole suite three times
         run: make test-repeat REPEAT=3
 
@@ -99,9 +95,6 @@ jobs:
       - name: Security tests
         run: go test -count=1 -v ./tests/security/...
 
-      # The unprivileged claims in todo.md are only evidence if the suite that
-      # checks them actually runs without privileges, so assert it rather than
-      # assume it.
       - name: Fail if the suite is running privileged
         run: |
           euid=$(id -u)
@@ -127,8 +120,6 @@ jobs:
       - name: Fuzz configuration parsers
         run: make fuzz FUZZ_TIME=30s
 
-      # A corpus entry that reaches the cache directory was found by a fuzzing
-      # run and must be committed, otherwise the finding is lost.
       - name: Report newly written corpus entries
         run: |
           new_entries="$(git status --porcelain -- internal/config/testdata)"
@@ -151,18 +142,12 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
 
-      # The packet layer is the part of NetForge that is handed bytes it did
-      # not create, so it is fuzzed on every push rather than only on a
-      # schedule. Each target runs on its own; a target that stopped early
-      # would hide the ones after it.
       - name: Replay the recorded packet corpus
         run: go test -count=1 -run 'Fuzz' ./internal/packet/
 
       - name: Fuzz packet parsers and checksum
         run: make fuzz-packet FUZZ_TIME=30s
 
-      # A corpus entry that reaches the cache directory was found by a fuzzing
-      # run and must be committed, otherwise the finding is lost.
       - name: Report newly written corpus entries
         run: |
           new_entries="$(git status --porcelain -- internal/packet/testdata)"
@@ -185,10 +170,6 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
 
-      # The forwarding decision turns a frame NetForge did not create into an
-      # action on a real interface, so it is fuzzed on every push. Only the
-      # decision is fuzzed, because it needs no interface and therefore no
-      # privileges, which keeps it in the unprivileged jobs.
       - name: Replay the recorded forwarding corpus
         run: go test -count=1 -run 'Fuzz' ./internal/router/
 

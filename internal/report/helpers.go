@@ -17,7 +17,6 @@ func itoaU64(value uint64) string {
 	return strconv.FormatUint(value, 10)
 }
 
-// percent renders a percentage without absurd precision.
 func percent(value float64) string {
 	if value == 0 {
 		return "0"

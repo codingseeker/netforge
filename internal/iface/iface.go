@@ -32,13 +32,7 @@ func ValidateName(op, field, name string) error {
 			op, field, len(name), MaxNameLength)
 	}
 	if name[0] == '-' {
-		// A name is handed to `ip` and `tc` as one argument of a command that
-		// runs with privileges this process does not have. The kernel would
-		// accept a leading dash in a device name, but the argument parser in
-		// front of it would not: it reads a leading dash as an option, so
-		// "-master" would add an argument to a privileged command rather than
-		// name a device. Nothing in a laboratory needs such a name, so it is
-		// refused rather than quoted around.
+
 		return fmt.Errorf("%s: %s %q starts with a dash, which the kernel's argument parser reads as an option",
 			op, field, name)
 	}

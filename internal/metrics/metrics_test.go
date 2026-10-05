@@ -24,8 +24,6 @@ func sampleMeasurement(sent, received int, rtt time.Duration, bytes int64, goodp
 	}
 }
 
-// sampleReport is a run with a healthy baseline, a fully broken observation and
-// a verified repair, so every metric has a measurement to come from.
 func sampleReport() experiment.Report {
 	return experiment.Report{
 		Name:         "sample",
@@ -70,7 +68,7 @@ func TestFromReportDerivesTheMeasuredNumbers(t *testing.T) {
 	if m.Retransmissions != 0 {
 		t.Errorf("Retransmissions = %d, want 0 for echo measurements", m.Retransmissions)
 	}
-	// The highest measured rate is the healthy baseline's.
+
 	if m.Throughput != 1000 {
 		t.Errorf("Throughput = %d, want 1000", m.Throughput)
 	}
@@ -129,9 +127,7 @@ func TestFromReportHandlesARunThatMeasuredNothing(t *testing.T) {
 }
 
 func TestFromReportDerivesLossFromCounts(t *testing.T) {
-	// The loss field of a measurement is deliberately ignored: the metric is
-	// derived from the counts the kernel reported, so it cannot disagree with
-	// the packet counts in the same report.
+
 	var report experiment.Report
 	report.Observed = []probe.Measurement{
 		{Target: "10.42.0.6", Sent: 10, Received: 4, Loss: 0, Bytes: 100},

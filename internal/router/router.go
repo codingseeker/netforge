@@ -30,9 +30,7 @@ const (
 type Device struct {
 	Name      string         `json:"name"`
 	Addresses []netip.Prefix `json:"addresses"`
-	// MTU is the largest packet the link will carry. The router uses it to
-	// decide whether a packet can leave by this device at all, because a
-	// packet that cannot is a decision to make rather than a send to attempt.
+
 	MTU int `json:"mtu,omitempty"`
 }
 
@@ -55,8 +53,6 @@ type device struct {
 	fd        int
 }
 
-// frameLimit is the largest frame the link will accept: the payload MTU plus
-// the Ethernet header the MTU does not count.
 func (d *device) frameLimit() int {
 	if d == nil || d.mtu <= 0 {
 		return 0
@@ -274,9 +270,7 @@ func (r *Router) attach(entry Device, index int, mac net.HardwareAddr, fd int) *
 		fd:        fd,
 	}
 	if dev.mtu <= 0 {
-		// A configuration that says nothing about the size is read as the
-		// laboratory's own default rather than as unlimited, so an absent MTU
-		// cannot quietly remove the check.
+
 		dev.mtu = defaultMTU
 	}
 	r.devices = append(r.devices, dev)

@@ -12,30 +12,16 @@ import (
 	"github.com/netforge/netforge/internal/apperr"
 )
 
-// Runner executes a command inside a named laboratory namespace and reports
-// its exit status. The namespace layer owns process creation; the engine only
-// ever supplies a validated argument vector, never a shell.
 type Runner interface {
 	Run(namespace string, argv ...string) (stdout, stderr string, code int, err error)
 }
 
-// Topology describes the laboratory an engine is allowed to touch. It is
-// consulted before any command runs, so a device that does not exist is
-// refused rather than discovered by trial and error.
 type Topology interface {
-	// Devices lists the data interfaces of a namespace, without loopback.
 	Devices(namespace string) ([]string, error)
-	// Peer returns the far end of the link a device belongs to.
+
 	Peer(namespace, device string) (Endpoint, bool)
 }
 
-// Engine injects faults into one laboratory and takes them back out again.
-//
-// Every fault is bounded by the limits, restricted to the scope, verified
-// against the kernel after it is applied, and removed when it expires, when
-// it is removed by name, or when the engine is closed. The engine holds its
-// lock while it talks to the laboratory so that a fault is never applied and
-// removed at the same time.
 type Engine struct {
 	mu     sync.Mutex
 	scope  Scope
@@ -45,8 +31,7 @@ type Engine struct {
 	now    func() time.Time
 
 	faults map[string]*Fault
-	// order keeps the insertion order so the oldest finished record is the one
-	// that is forgotten when the history is full.
+
 	order []string
 
 	stop     chan struct{}
@@ -55,8 +40,6 @@ type Engine struct {
 	closed   bool
 }
 
-// New builds an engine for one laboratory. The returned engine starts its
-// expiry watcher, so the caller must Close it when the laboratory goes away.
 func New(ctx context.Context, scope Scope, limits Limits, run Runner, topo Topology) (*Engine, error) {
 	const op = "chaos.New"
 	if run == nil {
@@ -86,13 +69,10 @@ func New(ctx context.Context, scope Scope, limits Limits, run Runner, topo Topol
 	return e, nil
 }
 
-// Limits returns the limits the engine enforces.
 func (e *Engine) Limits() Limits { return e.limits }
 
-// Scope returns the namespaces the engine may touch.
 func (e *Engine) Scope() Scope { return e.scope }
 
-// Apply injects one fault and returns the record the kernel agreed to.
 func (e *Engine) Apply(ctx context.Context, experiment string, spec Spec) (Fault, error) {
 	const op = "chaos.Engine.Apply"
 	if err := checkExperiment(op, experiment); err != nil {
@@ -153,9 +133,7 @@ func (e *Engine) Apply(ctx context.Context, experiment string, spec Spec) (Fault
 		fault.Status = StatusFailed
 		fault.Verified = false
 		fault.Reason = err.Error()
-		// The installation already undoes whatever it managed to do, so the
-		// failed record is not kept: a fault that is not in the kernel has no
-		// place in the ledger.
+
 		_ = e.forget(&fault)
 		return Fault{}, err
 	}
@@ -163,9 +141,6 @@ func (e *Engine) Apply(ctx context.Context, experiment string, spec Spec) (Fault
 	return fault, nil
 }
 
-// ApplyAll injects a set of faults. If any of them cannot be applied, the ones
-// that were already installed are removed again, so a rejected set never
-// leaves a laboratory half impaired.
 func (e *Engine) ApplyAll(ctx context.Context, experiment string, specs []Spec) ([]Fault, error) {
 	const op = "chaos.Engine.ApplyAll"
 	applied := make([]Fault, 0, len(specs))
@@ -188,7 +163,6 @@ func (e *Engine) ApplyAll(ctx context.Context, experiment string, specs []Spec) 
 	return applied, nil
 }
 
-// rollback removes faults in reverse order and returns the failures.
 func (e *Engine) rollback(faults []Fault) []error {
 	var failures []error
 	for i := len(faults) - 1; i >= 0; i-- {
@@ -199,8 +173,6 @@ func (e *Engine) rollback(faults []Fault) []error {
 	return failures
 }
 
-// Remove takes a fault back out of the kernel. Removing a fault that is
-// already gone succeeds, so cleanup paths can run more than once.
 func (e *Engine) Remove(id string) (Fault, error) {
 	const op = "chaos.Engine.Remove"
 	if id == "" {
@@ -230,11 +202,6 @@ func (e *Engine) Remove(id string) (Fault, error) {
 	return *fault, nil
 }
 
-// RemoveAll takes every active fault back out and returns the failures.
-//
-// Removal stays available on a closed engine. Closing an engine is how a
-// laboratory hands its faults back, so refusing to remove them afterwards would
-// leave the last faults in the kernel with nothing left to take them out.
 func (e *Engine) RemoveAll() error {
 	const op = "chaos.Engine.RemoveAll"
 	e.mu.Lock()
@@ -257,9 +224,6 @@ func (e *Engine) RemoveAll() error {
 	return errors.Join(failures...)
 }
 
-// Expire removes every fault whose deadline has passed and returns the number
-// of faults that were removed. The expiry watcher calls it; a caller that
-// drives time itself can call it directly.
 func (e *Engine) Expire(now time.Time) int {
 	const op = "chaos.Engine.Expire"
 	e.mu.Lock()
@@ -288,7 +252,6 @@ func (e *Engine) Expire(now time.Time) int {
 	return removed
 }
 
-// Get returns a fault record by id.
 func (e *Engine) Get(id string) (Fault, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -299,7 +262,6 @@ func (e *Engine) Get(id string) (Fault, bool) {
 	return *fault, true
 }
 
-// List returns every known fault record, oldest first.
 func (e *Engine) List() []Fault {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -312,7 +274,6 @@ func (e *Engine) List() []Fault {
 	return out
 }
 
-// Active returns the number of faults currently expected in the kernel.
 func (e *Engine) Active() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -325,11 +286,8 @@ func (e *Engine) Active() int {
 	return active
 }
 
-// Close stops the expiry watcher and takes every fault back out of the
-// laboratory. It is safe to call more than once.
 func (e *Engine) Close() error {
-	// The engine stops taking new work before it starts cleaning up, so a
-	// fault cannot slip in between the last removal and the return.
+
 	e.mu.Lock()
 	e.closed = true
 	e.mu.Unlock()
@@ -339,8 +297,6 @@ func (e *Engine) Close() error {
 	return e.RemoveAll()
 }
 
-// install puts a fault into the kernel and verifies it. If any step fails the
-// fault is taken back out again, so a failed installation leaves no trace.
 func (e *Engine) install(ctx context.Context, fault *Fault) error {
 	const op = "chaos.install"
 	device := fault.Source.Interface
@@ -349,9 +305,6 @@ func (e *Engine) install(ctx context.Context, fault *Fault) error {
 		return err
 	}
 
-	// The device starts from an empty discipline: replacing a netem qdisc
-	// merges options, which would leave parameters from an earlier fault in
-	// place and make the record describe something the kernel never applied.
 	if err := e.clear(op, fault.Source.Namespace, device); err != nil {
 		return err
 	}
@@ -385,24 +338,14 @@ func (e *Engine) install(ctx context.Context, fault *Fault) error {
 	return nil
 }
 
-// uninstall removes whatever the fault may have installed, ignoring failures:
-// it is the rollback of a step that already failed.
 func (e *Engine) uninstall(fault *Fault) {
 	_, _, _, _ = e.runIn(fault.Source.Namespace, delArgs(fault.Source.Interface))
 }
 
-// detach removes a fault from the kernel and confirms it is gone.
 func (e *Engine) detach(op string, fault *Fault) error {
 	return e.clear(op, fault.Source.Namespace, fault.Source.Interface)
 }
 
-// clear takes a device back to the kernel's own empty discipline.
-//
-// The exit status of the delete is not the evidence here. The kernel reports a
-// device that never carried a discipline as an error, and a device that never
-// carried one is exactly the state a fault has to start from and end in. What
-// decides whether the device is clear is the state the kernel reports after the
-// delete, so that is what is checked.
 func (e *Engine) clear(op, namespace, device string) error {
 	_, _, _, _ = e.runIn(namespace, delArgs(device))
 	states, err := e.states(namespace, device)
@@ -416,7 +359,6 @@ func (e *Engine) clear(op, namespace, device string) error {
 	return nil
 }
 
-// states reads and parses the kernel state of a device.
 func (e *Engine) states(namespace, device string) ([]qdiscState, error) {
 	const op = "chaos.Engine.states"
 	stdout, stderr, code, err := e.run(namespace, showArgs(device)...)
@@ -431,8 +373,6 @@ func (e *Engine) states(namespace, device string) ([]qdiscState, error) {
 	return parseState(stdout)
 }
 
-// runIn runs a command and turns a nonzero exit into an error, keeping the
-// kernel's own message as the cause.
 func (e *Engine) runIn(namespace string, argv []string) (string, string, int, error) {
 	stdout, stderr, code, err := e.run(namespace, argv...)
 	if err != nil {
@@ -456,9 +396,6 @@ func (e *Engine) run(namespace string, argv ...string) (string, string, int, err
 	return e.runner.Run(namespace, argv...)
 }
 
-// checkNamespaceArg refuses to run in anything but a scoped namespace. It is
-// the last line of defence: even a bug in a caller cannot aim the engine at
-// the host network.
 func (s Scope) checkNamespaceArg(namespace string) error {
 	if s.allows(namespace) {
 		return nil
@@ -467,7 +404,6 @@ func (s Scope) checkNamespaceArg(namespace string) error {
 		"the namespace %q is outside the chaos scope", namespace), nil)
 }
 
-// reserve makes room for one more active fault and trims the history.
 func (e *Engine) reserve(op string) error {
 	active := 0
 	for _, fault := range e.faults {
@@ -482,14 +418,12 @@ func (e *Engine) reserve(op string) error {
 	return nil
 }
 
-// remember stores a fault record and keeps the history within its bound.
 func (e *Engine) remember(fault *Fault) {
 	e.faults[fault.ID] = fault
 	e.order = append(e.order, fault.ID)
 	e.trim()
 }
 
-// forget drops a record that was never installed.
 func (e *Engine) forget(fault *Fault) error {
 	if _, ok := e.faults[fault.ID]; !ok {
 		return nil
@@ -504,9 +438,6 @@ func (e *Engine) forget(fault *Fault) error {
 	return nil
 }
 
-// trim forgets the oldest finished records once the history is twice the
-// fault limit, so a long laboratory cannot grow the ledger without bound. A
-// laboratory whose whole history is active keeps its records.
 func (e *Engine) trim() {
 	limit := 2 * e.limits.MaxFaults
 	for len(e.order) > limit {
@@ -527,7 +458,6 @@ func (e *Engine) trim() {
 	}
 }
 
-// deviceOwner returns the id of the active fault on a device, if any.
 func (e *Engine) deviceOwner(namespace, device string) (string, string) {
 	for _, id := range e.order {
 		fault, ok := e.faults[id]
@@ -541,9 +471,6 @@ func (e *Engine) deviceOwner(namespace, device string) (string, string) {
 	return device, ""
 }
 
-// resolve decides which device carries the fault and what the two ends of the
-// impaired link are. The device is only chosen from the topology, never by
-// running a command and hoping for the best.
 func (e *Engine) resolve(op string, spec Spec) (resolved, error) {
 	devices, err := e.topo.Devices(spec.Target)
 	if err != nil {
@@ -577,8 +504,7 @@ func (e *Engine) resolve(op string, spec Spec) (resolved, error) {
 		return resolved{}, apperr.NotFound(op, fmt.Sprintf(
 			"the far end of %s is not part of the laboratory, an impaired link needs both ends", target), nil)
 	}
-	// The queue discipline always sits on the egress side of the link: an
-	// inbound fault is applied where the packets leave the peer.
+
 	source, destination := target, peer
 	if spec.Direction == DirectionIn {
 		source, destination = peer, target
@@ -586,7 +512,6 @@ func (e *Engine) resolve(op string, spec Spec) (resolved, error) {
 	return resolved{target: target, source: source, destination: destination}, nil
 }
 
-// resolved is the placement of a fault on a link.
 type resolved struct {
 	target      Endpoint
 	source      Endpoint
@@ -600,13 +525,10 @@ func describe(devices []string) string {
 	return strings.Join(devices, ", ")
 }
 
-// deriveID builds a stable identifier for a fault that was not named.
 func deriveID(spec Spec, at resolved) string {
 	return fmt.Sprintf("%s@%s:%s", spec.Kind, at.source, spec.Direction)
 }
 
-// kindOf keeps the kind of an error that already carries one, so wrapping
-// does not lose the reason a step failed.
 func kindOf(err error) apperr.Kind {
 	if kind, ok := apperr.KindOf(err); ok {
 		return kind
@@ -614,8 +536,6 @@ func kindOf(err error) apperr.Kind {
 	return apperr.KindInternal
 }
 
-// commandFailure turns a nonzero exit into a cause that keeps the message the
-// program printed.
 func commandFailure(stderr string, code int) error {
 	message := strings.TrimSpace(stderr)
 	if message == "" {
@@ -624,7 +544,6 @@ func commandFailure(stderr string, code int) error {
 	return fmt.Errorf("exit status %d: %s", code, message)
 }
 
-// checkExperiment validates the experiment a fault belongs to.
 func checkExperiment(op, experiment string) error {
 	if strings.TrimSpace(experiment) == "" {
 		return apperr.InvalidArgument(op, "a fault must belong to an experiment", nil)
@@ -638,9 +557,6 @@ func checkExperiment(op, experiment string) error {
 
 const maxExperimentLength = 128
 
-// watch removes expired faults until the engine is closed or the laboratory
-// context ends. A laboratory that goes away without closing the engine still
-// gets its faults taken back out.
 func (e *Engine) watch(ctx context.Context) {
 	defer close(e.done)
 	ticker := time.NewTicker(expiryTick)
@@ -658,5 +574,4 @@ func (e *Engine) watch(ctx context.Context) {
 	}
 }
 
-// expiryTick is how often the engine looks for faults that ran out of time.
 const expiryTick = time.Second

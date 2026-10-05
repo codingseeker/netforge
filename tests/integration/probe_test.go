@@ -12,10 +12,6 @@ import (
 	"github.com/netforge/netforge/internal/service"
 )
 
-// probeLabSpec builds a one client, one server laboratory whose server
-// namespace serves every endpoint the six protocols need. The server is
-// started by the laboratory, so the far end of each probe is a real listener
-// rather than a claim in a test.
 func probeLabSpec(t *testing.T, id, cidr string) (network.Spec, network.Plan) {
 	t.Helper()
 	plan, err := network.BuildPlan(id, cidr, 1, 1, 1500)
@@ -140,9 +136,7 @@ func TestTheServiceReportsWhatItIsServing(t *testing.T) {
 	if status.PID <= 0 {
 		t.Errorf("ServiceStatus(0).PID = %d, want a real process", status.PID)
 	}
-	// Every endpoint the specification asked for has to be bound, because a
-	// probe that finds no listener measures nothing. Each entry names its own
-	// protocol and the address it really holds.
+
 	bound := strings.Join(status.Bound, " ")
 	for _, want := range []string{
 		"tcp/[::]:9100", "udp/[::]:9101", "dns/[::]:9102",
@@ -209,8 +203,7 @@ func TestAProbeIsBounded(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	spec, plan := probeLabSpec(t, "phase5-bounds", "10.55.3.0/24")
-	// One probe at a time and a small answer budget, so the bounds the engine
-	// claims to enforce are the ones being tested.
+
 	spec.Probes = probe.Limits{
 		MaxResponseSize:  512,
 		MaxSize:          256,
@@ -230,8 +223,6 @@ func TestAProbeIsBounded(t *testing.T) {
 	client := plan.Nodes[0].Namespace
 	server := plan.Nodes[1].Address.Addr().String()
 
-	// More results than the store keeps: the store is the bound, and it drops
-	// the oldest rather than growing.
 	for i := range 6 {
 		request := probe.Request{
 			Protocol: probe.ProtocolHTTP, Target: server, Port: 9104, Path: "/health",
@@ -247,8 +238,6 @@ func TestAProbeIsBounded(t *testing.T) {
 		t.Errorf("Results() = %d results, want at most the 4 the store keeps", len(results))
 	}
 
-	// A payload past MaxSize is refused rather than sent, so the agent never
-	// holds more than the bound allows.
 	oversized := probe.Request{
 		Protocol: probe.ProtocolTCP, Target: server, Port: 9100, Payload: 4096,
 		Namespace: client, Experiment: "phase5-bounds", Timeout: 2 * time.Second,
@@ -273,8 +262,6 @@ func TestAClosedServiceIsVisible(t *testing.T) {
 	client := plan.Nodes[0].Namespace
 	server := plan.Nodes[1].Address.Addr().String()
 
-	// Nothing listens on this port, so the probe has to report a refusal to
-	// connect rather than an answer. A diagnosis is only as good as this.
 	dead := probe.Request{
 		Protocol: probe.ProtocolTCP, Target: server, Port: 9999,
 		Namespace: client, Experiment: "phase5-closed", Timeout: 2 * time.Second,
@@ -291,7 +278,6 @@ func TestAClosedServiceIsVisible(t *testing.T) {
 	}
 }
 
-// destroy tears a laboratory down and insists that it goes.
 func destroy(t *testing.T, lab *network.Lab) {
 	t.Helper()
 	if err := lab.Destroy(context.Background()); err != nil {

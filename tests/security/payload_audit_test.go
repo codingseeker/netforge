@@ -13,9 +13,6 @@ import (
 	"github.com/netforge/netforge/internal/probe"
 )
 
-// interfaceDocument is the audit's control document with a device name in it,
-// so the interface boundary is exercised through the reader that sees untrusted
-// bytes rather than only through the validator on its own.
 func interfaceDocument(device string) string {
 	return "name: audit\n" +
 		"scope:\n  network: 10.42.0.0/24\n  namespaces:\n    - nf-audit\n" +
@@ -26,12 +23,6 @@ func interfaceDocument(device string) string {
 		"    interface: " + device + "\n"
 }
 
-// TestInvalidInterfaceNamesAreRefused refuses every device name the kernel
-// would not accept, through the document reader as well as through the
-// validator. A device name reaches `ip link` and `tc` as an argument of a
-// privileged helper, so a name carrying a metacharacter is a name the helper
-// would have to be trusted with. Refusing it before any laboratory exists is
-// what keeps a document from ever reaching the point of running one.
 func TestInvalidInterfaceNamesAreRefused(t *testing.T) {
 	refused := []struct {
 		name   string
@@ -65,9 +56,6 @@ func TestInvalidInterfaceNamesAreRefused(t *testing.T) {
 		})
 	}
 
-	// The names a laboratory generates for itself stay valid, so the refusals
-	// above are the validator working rather than a document shape that never
-	// validates at all.
 	for _, device := range []string{"nfr-s0", "nfc0", "eth0.100", "a_b", strings.Repeat("i", 15)} {
 		if err := iface.ValidateName("audit", "interface", device); err != nil {
 			t.Errorf("iface.ValidateName rejected %q: %v", device, err)
@@ -78,11 +66,6 @@ func TestInvalidInterfaceNamesAreRefused(t *testing.T) {
 	}
 }
 
-// TestHostileTimeoutValuesAreRefused covers the two ways a timeout can be made
-// hostile rather than merely large. A negative timeout would put every deadline
-// the request carries in the past, so it is refused as a request that cannot be
-// read; a timeout past the limit would ask a measurement to outlast the
-// experiment that requested it, so it is refused at the limit.
 func TestHostileTimeoutValuesAreRefused(t *testing.T) {
 	scope, err := probe.NewScope(netip.MustParsePrefix("10.42.0.0/24"), []string{"nf-audit"})
 	if err != nil {
@@ -120,13 +103,6 @@ func TestHostileTimeoutValuesAreRefused(t *testing.T) {
 	}
 }
 
-// TestACancelledProbeIsRefusedBeforeItRuns runs a probe whose context has
-// already been cancelled. Cancellation has to end the wait where the request
-// is admitted, not after the measurement has been made: a probe that ignores
-// its context turns Ctrl-C into a hang, which is the same defect as an
-// unbounded timeout seen from the other side. The runner counts its calls so a
-// refusal that happened after the command ran could not pass for one that
-// happened before it.
 func TestACancelledProbeIsRefusedBeforeItRuns(t *testing.T) {
 	scope, err := probe.NewScope(netip.MustParsePrefix("10.42.0.0/24"), []string{"nf-audit"})
 	if err != nil {
@@ -166,21 +142,11 @@ func TestACancelledProbeIsRefusedBeforeItRuns(t *testing.T) {
 	}
 }
 
-// TestAMeasurementCarriesItsDeadlineAndRefusesToOverrunIt checks both halves of
-// the bound on one measurement. The deadline is handed to the helper as its own
-// argument, so a helper that has stopped answering is given up on rather than
-// waited for; and a measurement that comes back past the budget anyway is
-// refused rather than recorded, because a measurement taken outside its budget
-// describes a different experiment from the one that asked for it.
 func TestAMeasurementCarriesItsDeadlineAndRefusesToOverrunIt(t *testing.T) {
 	const budget = 300 * time.Millisecond
 	limits := probe.DefaultLimits()
 	limits.MaxDuration = budget
 
-	// The measurement is given the budget to overrun rather than to keep:
-	// `Measure` accepts a result that arrives late, so the delay has to clear
-	// the budget by more than the second of slack the check allows before it
-	// reports one.
 	runner := &recordingRunner{delay: budget + 1200*time.Millisecond}
 	measurer, err := probe.New(limits, runner)
 	if err != nil {
@@ -204,8 +170,6 @@ func TestAMeasurementCarriesItsDeadlineAndRefusesToOverrunIt(t *testing.T) {
 		t.Errorf("the refusal %q does not say the measurement overran its budget", err)
 	}
 
-	// The helper was told the deadline in its own argument vector rather than
-	// left to be waited for, and it was told one that fits inside the budget.
 	deadline := argumentValue(runner.argv, "-w")
 	if deadline == "" {
 		t.Fatalf("the helper was run without a deadline: %v", runner.argv)
@@ -219,7 +183,6 @@ func TestAMeasurementCarriesItsDeadlineAndRefusesToOverrunIt(t *testing.T) {
 	}
 }
 
-// argumentValue returns the value that follows a flag in an argument vector.
 func argumentValue(argv []string, flag string) string {
 	for index, argument := range argv {
 		if argument == flag && index+1 < len(argv) {
@@ -229,7 +192,6 @@ func argumentValue(argv []string, flag string) string {
 	return ""
 }
 
-// countingRunner records how many commands it was asked to run.
 type countingRunner struct {
 	calls int
 }
@@ -239,8 +201,6 @@ func (r *countingRunner) Run(string, ...string) (stdout, stderr string, code int
 	return "", "", 0, nil
 }
 
-// recordingRunner keeps the argument vector it was handed and answers after a
-// delay, which is what a helper that has stopped responding looks like.
 type recordingRunner struct {
 	argv  []string
 	delay time.Duration

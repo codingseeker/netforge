@@ -12,16 +12,11 @@ import (
 	"github.com/netforge/netforge/internal/chaos"
 )
 
-// benchmarkRow is one condition and what the three transports achieved on it.
 type benchmarkRow struct {
 	Condition condition
 	Results   []measurement
 }
 
-// writeBenchmarks records the comparison in the documentation, with the
-// conditions it was run under attached to every number. A table of throughput
-// figures without the loss, latency and machine it was measured on is not
-// evidence of anything, so the file records all three.
 func writeBenchmarks(rows []benchmarkRow) error {
 	var out bytes.Buffer
 	out.WriteString("# Transport benchmark\n\n")
@@ -134,10 +129,6 @@ func writeBenchmarks(rows []benchmarkRow) error {
 	return os.WriteFile(path, out.Bytes(), 0o644)
 }
 
-// benchmarkEnvironment reports what the run was measured on. A throughput figure
-// without the machine, the kernel and the revision it came from is not a
-// measurement, it is a number, so all three are recorded and a value that cannot
-// be read is said to be unknown rather than left out.
 func benchmarkEnvironment() []string {
 	out := []string{
 		fmt.Sprintf("%s, %s/%s", runtime.Version(), runtime.GOOS, runtime.GOARCH),
@@ -157,10 +148,6 @@ func benchmarkEnvironment() []string {
 	return out
 }
 
-// benchmarkRevision reports the commit the run was built from. Go embeds the
-// version control state in a binary built from a checkout, and says nothing when
-// there was no checkout, so the report distinguishes those rather than printing
-// an empty revision.
 func benchmarkRevision() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
@@ -184,8 +171,6 @@ func benchmarkRevision() string {
 	return "NetForge at " + revision
 }
 
-// cpuModel is the processor the run was measured on, which is what a byte rate
-// has to be read against.
 func cpuModel() string {
 	data, err := os.ReadFile("/proc/cpuinfo")
 	if err != nil {
@@ -200,8 +185,6 @@ func cpuModel() string {
 	return ""
 }
 
-// readProcValue returns the trimmed contents of a proc file, or the empty string
-// when it cannot be read.
 func readProcValue(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -210,8 +193,6 @@ func readProcValue(path string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// describeFault renders a fault as the kernel was asked to install it, so a
-// recorded row says what was actually applied rather than what it was called.
 func describeFault(spec chaos.Spec) string {
 	parts := make([]string, 0, 3)
 	if spec.Parameters.Latency > 0 {

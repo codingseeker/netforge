@@ -30,11 +30,6 @@ func sampleMeasurement(sent, received int, rtt time.Duration, bytes int64) probe
 	}
 }
 
-// sampleRun is a run that walked the whole lifecycle and repaired the path, so
-// every part of the report has a real value to come from. The recovery is made
-// through recovery.Authorize because that is the only producer of an
-// authorization, and a report built on anything shorter would assert something
-// the real code cannot produce.
 func sampleRun(t *testing.T) experiment.Report {
 	t.Helper()
 	seed := uint64(7)
@@ -177,8 +172,7 @@ func TestEncodeJSONRoundTrips(t *testing.T) {
 	if len(decoded.Steps) != len(report.Steps) || decoded.Steps[5].Recovery != "remove_fault" {
 		t.Errorf("the round-trip changed the lifecycle")
 	}
-	// The raw document must not contain the numbers the run judged broken: a
-	// failed phase is not a phase that measured nothing.
+
 	if strings.Contains(buf.String(), `"error"`) {
 		t.Errorf("a successful run was encoded with an error field:\n%s", buf.String())
 	}
@@ -217,7 +211,7 @@ func TestEncodeTextNamesTheRunAndEveryMetric(t *testing.T) {
 
 func TestEncodeTextReportsAFailedRun(t *testing.T) {
 	run := sampleRun(t)
-	run.Succeeded() // the sample is a success; break it below
+	run.Succeeded()
 	run.Steps[len(run.Steps)-1].Err = errors.New("the verification found loss")
 	run.Err = errors.New("the verification found loss")
 	run.Failed = experiment.StateVerify

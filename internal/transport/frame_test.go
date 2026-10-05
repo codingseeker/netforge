@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// A frame has to survive a round trip through the wire format, because the two
-// sides of this transport are the only implementations of it.
 func TestAFrameSurvivesTheWire(t *testing.T) {
 	t.Parallel()
 	cases := []Frame{
@@ -43,8 +41,6 @@ func TestAFrameSurvivesTheWire(t *testing.T) {
 	}
 }
 
-// A datagram that is not one of this transport's frames must be refused, and
-// the refusal must not depend on what is in it.
 func TestAFrameThatIsNotOursIsRefused(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -134,8 +130,6 @@ func TestAFrameThatIsNotOursIsRefused(t *testing.T) {
 	}
 }
 
-// A peer is not trusted to keep its datagrams small. The size is checked before
-// anything is read out of the buffer.
 func TestAnOversizedDatagramIsRefusedBeforeItIsRead(t *testing.T) {
 	t.Parallel()
 	oversized := make([]byte, MaxFrameSize+1)
@@ -147,8 +141,6 @@ func TestAnOversizedDatagramIsRefusedBeforeItIsRead(t *testing.T) {
 	}
 }
 
-// The payload ceiling is enforced on the way out as well as on the way in, so a
-// caller cannot make this side build a buffer larger than a frame.
 func TestAPayloadLargerThanAFrameIsRefused(t *testing.T) {
 	t.Parallel()
 	oversized := Frame{Flags: FlagData, Sequence: 1, Payload: make([]byte, MaxPayloadSize+1)}
@@ -165,8 +157,6 @@ func TestAPayloadLargerThanAFrameIsRefused(t *testing.T) {
 	}
 }
 
-// Encoding must not depend on anything outside the frame, so a frame encoded
-// twice is byte-identical and a peer cannot be confused by padding.
 func TestEncodingIsDeterministic(t *testing.T) {
 	t.Parallel()
 	give := Frame{Flags: FlagData, Sequence: 42, Payload: []byte("payload")}
@@ -183,15 +173,12 @@ func TestEncodingIsDeterministic(t *testing.T) {
 			t.Fatal("Marshal() produced different bytes for the same frame")
 		}
 	}
-	// The reserved bytes are written as zero rather than left as they were.
+
 	if first[14] != 0 || first[15] != 0 || first[16] != 0 || first[17] != 0 {
 		t.Errorf("the reserved bytes are %v, want them written as zero", first[14:18])
 	}
 }
 
-// Bytes a frame does not describe are refused rather than ignored. Accepting
-// them would leave the length of a frame meaning two things, and a peer that
-// can choose where a payload starts can choose what a peer reads.
 func TestBytesPastTheDeclaredLengthAreRefused(t *testing.T) {
 	t.Parallel()
 	encoded, err := Frame{Flags: FlagData, Sequence: 3, Payload: []byte("abc")}.Marshal()
@@ -202,8 +189,7 @@ func TestBytesPastTheDeclaredLengthAreRefused(t *testing.T) {
 	if _, err := Unmarshal(padded); err == nil {
 		t.Error("Unmarshal() of a padded frame = nil error, want a refusal")
 	}
-	// The frame without the padding is still accepted, so the refusal above is
-	// about the disagreement and not about the frame itself.
+
 	if _, err := Unmarshal(encoded); err != nil {
 		t.Errorf("Unmarshal() = %v, want nil", err)
 	}

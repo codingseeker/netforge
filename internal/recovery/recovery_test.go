@@ -29,7 +29,6 @@ func testScope(t *testing.T) Scope {
 	return scope
 }
 
-// fakeExecutor records what it was asked to do and can be told to fail.
 type fakeExecutor struct {
 	mu    sync.Mutex
 	calls []string
@@ -78,7 +77,6 @@ func (f *fakeExecutor) ReEnableBackend(_ context.Context, ns, target string) err
 	return f.record("re_enable_backend:" + ns + ":" + target)
 }
 
-// fakeProber returns a measurement the test chooses, and can refuse to measure.
 type fakeProber struct {
 	mu          sync.Mutex
 	measurement probe.Measurement
@@ -109,8 +107,6 @@ func (f *fakeProber) count() int {
 	return f.calls
 }
 
-// kindName renders the kind of an error for a message, so a test failure says
-// which kind the refusal actually was.
 func kindName(err error) string {
 	kind, ok := apperr.KindOf(err)
 	if !ok {
@@ -179,7 +175,6 @@ func TestADiagnosisCannotAuthorizeItself(t *testing.T) {
 			recommendation.Action, recommendation.Target, ActionRestoreRoute)
 	}
 
-	// The suggestion becomes a request, and the request is still unauthorized.
 	request := recommendation.Requested(client)
 	if request.Consent {
 		t.Fatal("a recommendation produced a consented request")
@@ -243,8 +238,7 @@ func TestAnUnknownActionIsRefused(t *testing.T) {
 }
 
 func TestEveryAllowedActionHasAnExecutor(t *testing.T) {
-	// Each action named in the phase is performed end to end, so no action can
-	// be listed without something behind it.
+
 	executor := &fakeExecutor{}
 	prober := &fakeProber{measurement: healthy()}
 	requests := []Request{
@@ -310,8 +304,7 @@ func TestARecoveryStopsAtTheFirstFailure(t *testing.T) {
 }
 
 func TestAnActionThatDoesNotRecoverIsAFailure(t *testing.T) {
-	// The action succeeds and the measurement still shows loss. Reporting that
-	// as a recovery would be the worst outcome this package could produce.
+
 	executor := &fakeExecutor{}
 	broken := healthy()
 	broken.Received = 2
@@ -356,8 +349,7 @@ func testAnUnmeasurablePathIsNotAVerification(t *testing.T) {
 }
 
 func TestTheWholeRequestSetIsValidatedBeforeAnyAction(t *testing.T) {
-	// The second request is invalid, so nothing may run: the laboratory must
-	// not be left half repaired because a later entry turned out to be bad.
+
 	executor := &fakeExecutor{}
 	prober := &fakeProber{measurement: healthy()}
 	_, err := New(testScope(t), []Request{
@@ -420,8 +412,7 @@ func TestAReasonIsRequired(t *testing.T) {
 }
 
 func TestTheActionSetIsClosedAndListed(t *testing.T) {
-	// A closed set is what keeps a recovery from becoming a second interface to
-	// the kernel, so the count is asserted rather than assumed.
+
 	if len(Actions()) != 7 {
 		t.Errorf("%d actions are allowed, the phase names 7", len(Actions()))
 	}
@@ -442,8 +433,7 @@ func TestTheActionSetIsClosedAndListed(t *testing.T) {
 }
 
 func TestAnAuthorizationIsOnlyIssuedForItsOwnExperiment(t *testing.T) {
-	// A grant made for one experiment's scope must not be reusable for
-	// another, which is what stops a leftover grant from leaking into a run.
+
 	first := testScope(t)
 	second, err := NewScope("nf-test-0002", labNetwork, []string{client, router, serviceA})
 	if err != nil {
@@ -464,22 +454,18 @@ func TestAnAuthorizationIsOnlyIssuedForItsOwnExperiment(t *testing.T) {
 func TestTheScopeRefusesAmbiguousAddresses(t *testing.T) {
 	scope := testScope(t)
 
-	// A balancer knows a backend by its endpoint, so an endpoint is the form a
-	// backend action is named in, and a bare address is the whole-device form.
-	// Both are inside the network, so both are granted.
 	for _, target := range []string{"10.42.0.2:7000", "10.42.0.2:80", "10.42.0.2"} {
 		if err := scope.AllowsTarget(ActionRemoveBackend, target); err != nil {
 			t.Errorf("%q was refused as a backend: %v", target, err)
 		}
 	}
-	// A zone, a namespace and a port with no address are all refused rather
-	// than trimmed into something that parses.
+
 	for _, target := range []string{"10.42.0.2%eth0", "service-a", ":7000", "10.42.0.2:", ""} {
 		if err := scope.AllowsTarget(ActionRemoveBackend, target); err == nil {
 			t.Errorf("%q was accepted as a backend address", target)
 		}
 	}
-	// An endpoint outside the network is refused whichever form it takes.
+
 	for _, target := range []string{"10.99.0.2:7000", "10.99.0.2"} {
 		err := scope.AllowsTarget(ActionRemoveBackend, target)
 		if err == nil || !strings.Contains(err.Error(), "outside scope.network") {
@@ -487,21 +473,18 @@ func TestTheScopeRefusesAmbiguousAddresses(t *testing.T) {
 		}
 	}
 
-	// A route destination is a prefix, or a bare address read as a host route.
 	for _, target := range []string{labNetwork, "10.42.0.0/24", "10.42.0.9"} {
 		if err := scope.AllowsTarget(ActionRestoreRoute, target); err != nil {
 			t.Errorf("%q was refused as a route destination: %v", target, err)
 		}
 	}
-	// A destination wider than the scope, or in another family, is refused: a
-	// route past the scope is the mistake a scope exists to prevent. That
-	// includes the default route, which reaches everywhere the scope does not.
+
 	for _, target := range []string{"10.0.0.0/8", "0.0.0.0/0", "2001:db8::/32", "10.99.0.0/24"} {
 		if err := scope.AllowsTarget(ActionRestoreRoute, target); err == nil {
 			t.Errorf("%q was accepted as a route destination", target)
 		}
 	}
-	// A namespace action is not an address action and cannot borrow its grant.
+
 	if err := scope.AllowsTarget(ActionRestartService, "10.42.0.2"); err == nil {
 		t.Error("an address was accepted as a namespace")
 	}
@@ -509,8 +492,6 @@ func TestTheScopeRefusesAmbiguousAddresses(t *testing.T) {
 		t.Error("a namespace outside the scope was accepted")
 	}
 
-	// An observation is one address, so a port or a prefix is refused there even
-	// though a backend action would accept both.
 	for _, target := range []string{"10.42.0.2:7000", "10.42.0.0/24", "10.42.0.2%eth0"} {
 		if err := scope.AllowsObservation(target); err == nil {
 			t.Errorf("%q was accepted as an observation target", target)

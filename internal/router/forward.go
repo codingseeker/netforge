@@ -69,9 +69,7 @@ func send(dev *device, frame []byte, kind packet.EtherType) error {
 		return errors.New("the frame is shorter than an Ethernet header")
 	}
 	if dev.mtu > 0 && len(frame) > dev.mtu+ethernetMinimum {
-		// Refused here rather than left to the kernel's own answer, so that a
-		// frame too large for the link is a decision the router records
-		// instead of a send failure it can only report after the fact.
+
 		return fmt.Errorf("a frame of %d bytes does not fit a link of %d", len(frame), dev.mtu)
 	}
 	address := &syscall.SockaddrLinklayer{
@@ -348,11 +346,7 @@ func (r *Router) decideIPv4(dev *device, raw []byte, link *packet.Ethernet) plan
 		return plan{kind: dropMalformed, reason: "forward frame"}
 	}
 	if egress.mtu > 0 && len(frame) > egress.mtu+ethernetMinimum {
-		// The packet is larger than the link it would leave by and its sender
-		// asked for it not to be fragmented, so there is nothing this router
-		// can do with it. A real router answers with the size the next hop can
-		// take, which is what lets the sender send a smaller packet instead of
-		// discovering the limit by silence.
+
 		step := plan{
 			kind:     dropOversize,
 			reason:   "oversize for " + egress.name,
@@ -400,9 +394,7 @@ func (r *Router) icmpFrame(dev *device, raw []byte, source netip.Addr, kind pack
 	message := &packet.ICMP{Type: kind, Code: code}
 	copy(message.RestOfHeader[:], original[0:4])
 	if mtu > 0 && kind == packet.ICMPTypeDestinationUnreachable && code == packet.ICMPCodeFragmentationNeeded {
-		// The next hop MTU is the two bytes the message reserves for it, and it
-		// is the whole point of the answer: it is the size the sender has to
-		// fit inside.
+
 		putUint16(message.RestOfHeader[2:4], mtu)
 	}
 	message.Payload = append([]byte(nil), raw[ethernetMinimum:ethernetMinimum+room]...)
@@ -464,8 +456,6 @@ func (r *Router) addressOn(dev *device, target netip.Addr) netip.Addr {
 	return dev.addresses[0].Addr()
 }
 
-// putUint16 writes a big endian field, which is the order every field of a
-// packet header uses.
 func putUint16(dst []byte, value uint16) {
 	dst[0] = byte(value >> 8)
 	dst[1] = byte(value)

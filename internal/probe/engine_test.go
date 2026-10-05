@@ -17,8 +17,6 @@ import (
 	"github.com/netforge/netforge/internal/apperr"
 )
 
-// fakeScope is a laboratory scope for the engine tests: two namespaces on one
-// network, so a refusal and an acceptance can both be exercised.
 func fakeScope() Scope {
 	return Scope{
 		Network:    netip.MustParsePrefix("10.60.0.0/24"),
@@ -39,8 +37,6 @@ func testLimits() Limits {
 	}
 }
 
-// engineRunner answers a probe the way the agent would, and records what it
-// was asked to run.
 type engineRunner struct {
 	mu      sync.Mutex
 	calls   [][]string
@@ -127,8 +123,6 @@ func validRequest() Request {
 	}
 }
 
-// A refused request must be recorded, because "the probe was refused" and "the
-// probe found nothing" are different answers.
 func TestARefusedProbeIsRecordedAsAProbe(t *testing.T) {
 	t.Parallel()
 	runner := &engineRunner{result: echoResult}
@@ -222,8 +216,6 @@ func TestAnInvalidRequestIsRefused(t *testing.T) {
 	}
 }
 
-// An echo probe carries no port, so one that is set is dropped rather than
-// being silently measured against it.
 func TestAnEchoProbeDropsAPort(t *testing.T) {
 	t.Parallel()
 	echo := &fakeEchor{measurement: Measurement{Sent: 1, Received: 1, AverageRTT: time.Millisecond}}
@@ -245,8 +237,6 @@ func TestAnEchoProbeDropsAPort(t *testing.T) {
 	}
 }
 
-// The bounds the engine enforces have to reach the agent, or the agent falls
-// back to its own defaults and a tighter limit means nothing.
 func TestTheBoundsTravelWithTheRequest(t *testing.T) {
 	t.Parallel()
 	runner := &engineRunner{result: echoResult}
@@ -289,8 +279,6 @@ func TestTheBoundsTravelWithTheRequest(t *testing.T) {
 	}
 }
 
-// A probe that cannot get a slot is told so instead of being queued without
-// bound.
 func TestConcurrencyIsBounded(t *testing.T) {
 	t.Parallel()
 	runner := &engineRunner{result: echoResult, delay: 80 * time.Millisecond}
@@ -326,8 +314,6 @@ func TestConcurrencyIsBounded(t *testing.T) {
 	}
 }
 
-// A timeout has to become a classified failure rather than a result that looks
-// like a slow success.
 func TestATimeoutIsAFailure(t *testing.T) {
 	t.Parallel()
 	runner := &engineRunner{
@@ -352,8 +338,6 @@ func TestATimeoutIsAFailure(t *testing.T) {
 	}
 }
 
-// A failure inside the result is a measurement, so it is recorded and the
-// caller gets no error.
 func TestAFailureTheAgentReportsIsAResult(t *testing.T) {
 	t.Parallel()
 	runner := &engineRunner{result: func(payload AgentPayload) Result {
@@ -382,8 +366,6 @@ func TestAFailureTheAgentReportsIsAResult(t *testing.T) {
 	}
 }
 
-// An answer for the wrong protocol is a laboratory problem, not a
-// measurement, and must not be stored as one.
 func TestAnAnswerForTheWrongProtocolIsRefused(t *testing.T) {
 	t.Parallel()
 	runner := &engineRunner{result: func(payload AgentPayload) Result {
@@ -400,8 +382,7 @@ func TestAnAnswerForTheWrongProtocolIsRefused(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("Results() = %d results, want the refusal recorded once", len(results))
 	}
-	// The record is the engine's own refusal, carrying the protocol that was
-	// asked for rather than the one the agent claimed.
+
 	if results[0].OK {
 		t.Error("the recorded result is OK, want a failure")
 	}
@@ -434,8 +415,6 @@ func TestAFailingAgentIsALaboratoryProblem(t *testing.T) {
 	}
 }
 
-// The store is a bound: a long laboratory drops the oldest results rather than
-// growing.
 func TestTheResultStoreIsBounded(t *testing.T) {
 	t.Parallel()
 	store, err := NewStore(4)
@@ -449,7 +428,7 @@ func TestTheResultStoreIsBounded(t *testing.T) {
 	if len(results) != 4 {
 		t.Fatalf("Results() = %d results, want the 4 the store keeps", len(results))
 	}
-	// The newest survive, because a diagnosis is about what just happened.
+
 	if results[len(results)-1].Target != "10.60.0.9" {
 		t.Errorf("the newest result is %q, want 10.60.0.9", results[len(results)-1].Target)
 	}
@@ -458,8 +437,6 @@ func TestTheResultStoreIsBounded(t *testing.T) {
 	}
 }
 
-// A caller must not be able to change stored results through the slice it was
-// given.
 func TestTheStoreHandsOutACopy(t *testing.T) {
 	t.Parallel()
 	store, err := NewStore(4)
@@ -475,8 +452,6 @@ func TestTheStoreHandsOutACopy(t *testing.T) {
 	}
 }
 
-// An echo probe is measured by the kernel's tool, so an engine without one
-// refuses it rather than reporting a measurement it did not make.
 func TestAnEchoProbeNeedsAnEchoMeasurer(t *testing.T) {
 	t.Parallel()
 	runner := &engineRunner{result: echoResult}
@@ -539,8 +514,6 @@ func TestAnEchoProbeUsesTheMeasurer(t *testing.T) {
 	}
 }
 
-// A measurement that completed with nothing coming back is a different answer
-// from a measurement that could not run.
 func TestAnEchoProbeWithNoReplyIsAFailure(t *testing.T) {
 	t.Parallel()
 	echo := &fakeEchor{measurement: Measurement{Sent: 3, Received: 0}}
@@ -565,9 +538,6 @@ func TestAnEchoProbeWithNoReplyIsAFailure(t *testing.T) {
 	}
 }
 
-// syscallErr is the shape a real dial failure has: a net.OpError wrapping an
-// os.SyscallError wrapping the errno. Classify unwraps it, so the test has to
-// build the same shape rather than a message that reads like one.
 func syscallErr(errno syscall.Errno) error {
 	return &net.OpError{
 		Op:  "dial",
@@ -591,8 +561,6 @@ func (e *fakeEchor) Measure(_ context.Context, namespace, target string, _ Optio
 	return e.measurement, e.err
 }
 
-// Every protocol has to name the layer a failure is attributed to, or a
-// diagnosis has nowhere to put it.
 func TestEveryProtocolNamesALayer(t *testing.T) {
 	t.Parallel()
 	want := map[Protocol]string{
@@ -619,8 +587,6 @@ func TestEveryProtocolNamesALayer(t *testing.T) {
 	}
 }
 
-// The failure categories are what an investigator reasons over, so each kind of
-// failure has to land in the right one.
 func TestFailuresAreClassified(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

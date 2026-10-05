@@ -30,17 +30,12 @@ type Spec struct {
 	MaxIfs   int
 	Routing  Routing
 	Router   RouterLimits
-	// Chaos bounds what the fault engine may do, and Probes what a
-	// measurement may cost. Zero values use the defaults of each package.
+
 	Chaos  chaos.Limits
 	Probes probe.Limits
-	// Faults are applied once the laboratory is up, and are taken back out
-	// when it is destroyed. A specification that the engine refuses fails the
-	// whole laboratory rather than leaving part of the set in the kernel.
+
 	Faults []chaos.Spec
-	// Services are the endpoints laboratory namespaces serve, so a probe has
-	// something real on the far end to measure. They are started after the
-	// links exist and stopped before the namespaces disappear.
+
 	Services []ServiceSpec
 }
 
@@ -51,10 +46,6 @@ const (
 	RoutingSoftware Routing = "software"
 )
 
-// String names the routing mode. The kernel mode is the empty value, because a
-// laboratory that forwards with the kernel asks for nothing; a report that
-// printed nothing in its place would read as a missing field rather than as the
-// mode every laboratory used before the software router existed.
 func (r Routing) String() string {
 	if r == RoutingKernel {
 		return "kernel"
@@ -77,13 +68,10 @@ type Lab struct {
 	spec   Spec
 	plan   Plan
 	holder *namespace.Lab
-	// prober runs protocol probes and services are the endpoints they
-	// measure. Both are owned by the laboratory.
+
 	prober   *probe.Engine
 	services []*serviceProcess
-	// work is this laboratory's own state directory. Every laboratory gets one,
-	// so two laboratories running at the same time cannot read each other's
-	// service status.
+
 	work     string
 	net      *iface.Controller
 	stack    *cleanup.Stack
@@ -94,11 +82,9 @@ type Lab struct {
 	router   *routerProcess
 	faults   *chaos.Engine
 	measurer *probe.Measurer
-	// declared are the faults the specification asked for, kept so a reader
-	// can see which records came from the file rather than from a caller.
+
 	declared []chaos.Fault
-	// experiment is the identifier every fault of this laboratory is recorded
-	// under.
+
 	experiment string
 }
 
@@ -124,9 +110,7 @@ func Create(ctx context.Context, spec Spec) (*Lab, error) {
 		net:    iface.New(holder),
 		stack:  cleanup.New(),
 		spaces: map[string]*Space{},
-		// Every fault of this laboratory is recorded under the same
-		// experiment, so the records of one laboratory can be told from
-		// another even when two run at once.
+
 		experiment: spec.ID,
 	}
 	stack, err := cleanup.NewWithTimeout(defaultTeardown)
@@ -135,12 +119,7 @@ func Create(ctx context.Context, spec Spec) (*Lab, error) {
 		return nil, err
 	}
 	lab.stack = stack
-	// The state directory is registered first, so it is removed last: a
-	// service has to be stopped before the file it reports into is gone. It is
-	// created through the reconciler rather than with os.MkdirTemp so that it
-	// carries an ownership marker: a run killed with SIGKILL cannot remove this
-	// directory, and a directory nobody can prove is NetForge's is one nobody may
-	// reclaim.
+
 	work, _, err := reconcile.Create(reconcile.StateRoot(), reconcile.KindLaboratory, spec.ID, time.Now())
 	if err != nil {
 		_ = lab.Destroy(ctx)
@@ -169,9 +148,7 @@ func Create(ctx context.Context, spec Spec) (*Lab, error) {
 			return nil, err
 		}
 	}
-	// The services come up before the declared faults, so the endpoints a
-	// probe is meant to measure exist before anything can impair the path to
-	// them, and a probe never races a listener that is still binding.
+
 	if err := lab.startServices(); err != nil {
 		_ = lab.stack.Run(ctx)
 		return nil, err
@@ -421,9 +398,6 @@ func (l *Lab) Destroy(ctx context.Context) error {
 	l.closed = true
 	l.mu.Unlock()
 
-	// The stack carries the laboratory's own teardown, and the holder carries
-	// the namespaces, so both have to go. Running the stack on its own leaves
-	// every namespace behind as soon as the stack holds anything else.
 	var failure error
 	if l.stack.Len() > 1 {
 		failure = l.stack.Run(ctx)

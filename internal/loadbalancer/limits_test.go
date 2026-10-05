@@ -9,9 +9,6 @@ import (
 	"github.com/netforge/netforge/internal/transport"
 )
 
-// The defaults are the limits a balancer runs under when a document names none,
-// and they are the numbers the report describes, so they are checked here rather
-// than left to be whatever they happen to be.
 func TestTheDefaultLimitsAreBoundedAndUsable(t *testing.T) {
 	t.Parallel()
 	checked, err := DefaultLimits().Validate()
@@ -32,9 +29,7 @@ func TestTheDefaultLimitsAreBoundedAndUsable(t *testing.T) {
 	if limits.Replicas <= 0 || limits.Replicas > MaxReplicaCeiling {
 		t.Errorf("replicas = %d, want between 1 and the ceiling of %d", limits.Replicas, MaxReplicaCeiling)
 	}
-	// The timings have to relate to each other, not merely be positive: a check
-	// that can outlast the interval it is spaced by makes the interval a
-	// suggestion, and a drain shorter than the interval is an abrupt close.
+
 	if limits.HealthTimeout >= limits.HealthInterval {
 		t.Errorf("the health timeout %s is not shorter than the interval %s it is spaced by",
 			limits.HealthTimeout, limits.HealthInterval)
@@ -47,17 +42,13 @@ func TestTheDefaultLimitsAreBoundedAndUsable(t *testing.T) {
 		t.Errorf("the defaults are above the ceilings: interval %s of %s, drain %s of %s",
 			limits.HealthInterval, MaxHealthInterval, limits.DrainTimeout, MaxDrainTimeout)
 	}
-	// The transport is given the balancer's own connection limit rather than one
-	// of its own, so the number a document sets is the number that applies.
+
 	if limits.Transport.MaxConnections != limits.MaxConnections {
 		t.Errorf("the transport was given %d connections, want the balancer's own %d",
 			limits.Transport.MaxConnections, limits.MaxConnections)
 	}
 }
 
-// A document that sets a limit above the ceiling is refused rather than being
-// truncated, because a balancer that quietly serves a quarter of what it was asked
-// for reports measurements of something it is not running.
 func TestALimitAboveItsCeilingIsRefused(t *testing.T) {
 	t.Parallel()
 	over := []struct {
@@ -81,12 +72,10 @@ func TestALimitAboveItsCeilingIsRefused(t *testing.T) {
 			t.Errorf("New() with %s above its ceiling = %v, want a refusal for exceeding a limit",
 				limit.name, err)
 		}
-		// The same limit at its ceiling is accepted, so the refusal above is the
-		// ceiling doing its job and not the whole configuration being unusable.
+
 		atCeiling := testConfig(PolicyRoundRobin, "127.0.0.1:9301")
 		limit.limits(&atCeiling.Limits)
-		// The timings are measured against each other, so one of them at its
-		// ceiling brings the others it is compared with.
+
 		switch limit.name {
 		case "backends":
 			atCeiling.Limits.MaxBackends = MaxBackendCeiling
@@ -113,8 +102,6 @@ func TestALimitAboveItsCeilingIsRefused(t *testing.T) {
 	}
 }
 
-// The timings are refused when they contradict each other, because either way round
-// the document asks for something the balancer cannot honour.
 func TestContradictoryTimingsAreRefused(t *testing.T) {
 	t.Parallel()
 	config := testConfig(PolicyRoundRobin, "127.0.0.1:9302")
@@ -129,8 +116,7 @@ func TestContradictoryTimingsAreRefused(t *testing.T) {
 	if _, err := New(config); err == nil {
 		t.Error("New() with a drain shorter than its health interval = nil, want a refusal")
 	}
-	// A transport limit above its own ceiling is refused, and it is still reported
-	// as a limit rather than as a bad argument, so a caller can tell the two apart.
+
 	config = testConfig(PolicyRoundRobin, "127.0.0.1:9302")
 	config.Limits.Transport.MaxPayload = transport.MaxPayloadSize * 8
 	if _, err := New(config); err == nil {
@@ -140,8 +126,6 @@ func TestContradictoryTimingsAreRefused(t *testing.T) {
 	}
 }
 
-// A limit that a document sets to zero is the default, so a document that only
-// wants one number changed does not have to restate the rest.
 func TestAZeroLimitMeansTheDefault(t *testing.T) {
 	t.Parallel()
 	defaults, err := DefaultLimits().Validate()
@@ -164,11 +148,6 @@ func TestAZeroLimitMeansTheDefault(t *testing.T) {
 	}
 }
 
-// A limit a document does not set positively is the default, which is the rule the
-// transport applies to the limits it is given. A negative limit is nonsense in a
-// document rather than a demand for less than nothing, and the default it becomes is
-// the bound this build uses, so a document cannot widen anything by getting it
-// wrong.
 func TestALimitThatIsNotPositiveIsTheDefault(t *testing.T) {
 	t.Parallel()
 	defaults, err := DefaultLimits().Validate()
@@ -192,8 +171,7 @@ func TestALimitThatIsNotPositiveIsTheDefault(t *testing.T) {
 	}
 	for _, limit := range notPositive {
 		config := testConfig(PolicyRoundRobin, "127.0.0.1:9303")
-		// The default limits are the base here, because a limit that is replaced
-		// by a default is only coherent against the rest of them.
+
 		config.Limits = DefaultLimits()
 		limit.limits(&config.Limits)
 		checked, err := config.Limits.Validate()
@@ -208,9 +186,6 @@ func TestALimitThatIsNotPositiveIsTheDefault(t *testing.T) {
 	}
 }
 
-// A limit below another limit it is part of is refused: a balancer that may hold
-// fewer connections on one backend than it may hold altogether is a document that
-// describes a fleet that cannot exist.
 func TestAPerBackendLimitAboveTheWholeIsRefused(t *testing.T) {
 	t.Parallel()
 	config := testConfig(PolicyRoundRobin, "127.0.0.1:9304")
@@ -225,9 +200,6 @@ func TestAPerBackendLimitAboveTheWholeIsRefused(t *testing.T) {
 	}
 }
 
-// A backend address is parsed rather than resolved. A name would let what it
-// resolves to be decided after the document was checked, and a name is the one
-// thing in a document that can change its answer between two runs.
 func TestABackendAddressIsParsedAndNeverResolved(t *testing.T) {
 	t.Parallel()
 	refused := []struct {
@@ -274,9 +246,6 @@ func TestABackendAddressIsParsedAndNeverResolved(t *testing.T) {
 	}
 }
 
-// A listen address with no port is allowed to ask for any port, because that is
-// how a balancer in a laboratory gets an address to report, and the address it
-// reports is the one the kernel gave it.
 func TestAListenAddressMayAskForAnyPort(t *testing.T) {
 	t.Parallel()
 	config := testConfig(PolicyRoundRobin, "127.0.0.1:7000")
@@ -288,17 +257,13 @@ func TestAListenAddressMayAskForAnyPort(t *testing.T) {
 	if _, port, err := splitPort(balancer.Address()); err != nil || port == 0 {
 		t.Errorf("address = %q on port %d, want a real port", balancer.Address(), port)
 	}
-	// The listen address is not held to the rule a backend is: a name would still
-	// be refused, because it resolves rather than parses.
+
 	config.Listen = "balancer.internal:7000"
 	if _, err := New(config); err == nil {
 		t.Error("New() with a name as the listen address = nil, want a refusal")
 	}
 }
 
-// A scope is a prefix, and one with host bits set is refused rather than masked,
-// because a scope that was quietly reinterpreted is a scope the operator did not
-// write and it decides what the balancer is allowed to reach.
 func TestAScopeMustBeAPrefix(t *testing.T) {
 	t.Parallel()
 	for _, scope := range []string{"10.0.0.1/24", "10.0.0.0/33", "not a prefix", "10.0.0.0/", "/24", "10.0.0.1"} {
@@ -308,23 +273,19 @@ func TestAScopeMustBeAPrefix(t *testing.T) {
 			t.Errorf("New() with the scope %q = nil, want a refusal", scope)
 		}
 	}
-	// A prefix with no host bits is accepted, and it is the network it names.
+
 	config := testConfig(PolicyRoundRobin, "10.0.0.9:7000")
 	config.Scope = "10.0.0.0/24"
 	if _, err := New(config); err != nil {
 		t.Errorf("New() with a canonical scope = %v, want nil", err)
 	}
-	// A default route holds everything, so it says nothing; the same rule the
-	// project's other prefixes follow is applied rather than a scope that every
-	// address passes by accident.
+
 	config.Scope = "0.0.0.0/0"
 	if _, err := New(config); err == nil {
 		t.Error("New() with a default route as the scope = nil, want a refusal")
 	}
 }
 
-// The listen address is reported back the way the kernel gave it, so a laboratory
-// that asked for any port learns which port it got.
 func TestTheAddressIsWhereTheBalancerIsListening(t *testing.T) {
 	t.Parallel()
 	balancer := startBalancer(t, testConfig(PolicyRoundRobin, "127.0.0.1:7000"))

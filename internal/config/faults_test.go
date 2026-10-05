@@ -10,8 +10,6 @@ import (
 	"github.com/netforge/netforge/internal/chaos"
 )
 
-// loadFaults parses a document that has faults in it, with the surrounding
-// configuration filled in so only the fault itself can be at fault.
 func loadFaults(t *testing.T, faults string) (*Config, error) {
 	t.Helper()
 	document := "name: f\nscope:\n  network: 10.42.0.0/16\n  namespaces:\n    - client\n    - server\n" +
@@ -159,7 +157,7 @@ func TestFaultsRejectTwoFaultsOnOneDevice(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "one device carries at most one fault") {
 		t.Errorf("got %v, want two faults on one device refused", err)
 	}
-	// The two ends of one link are two devices, so this pair is fine.
+
 	if _, err := loadFaults(t, "faults:\n  - {target: client, type: latency, value: 10ms}\n"+
 		"  - {target: client, direction: \"in\", type: packet_loss, value: \"10%\"}\n"); err != nil {
 		t.Errorf("a fault and its opposite direction must both fit, got %v", err)
@@ -182,8 +180,7 @@ func TestFaultsAreHeldToTheDeclaredLimits(t *testing.T) {
 func TestValidateRejectsTooManyFaults(t *testing.T) {
 	document := "name: f\nscope:\n  network: 10.42.0.0/16\n  namespaces:\n    - client\nfaults:\n"
 	for i := 0; i <= CeilingFaults; i++ {
-		// Distinct directions keep the faults off each other's devices, so
-		// the count is the only thing wrong.
+
 		direction := "out"
 		if i%2 == 1 {
 			direction = "in"

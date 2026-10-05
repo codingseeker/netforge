@@ -6,25 +6,18 @@ import (
 	"time"
 )
 
-// backendEntry is a registered backend by index, for the tests that exercise the
-// state machine directly rather than waiting for a health check to reach it.
 func backendEntry(balancer *Balancer, index int) *backend {
 	balancer.mu.Lock()
 	defer balancer.mu.Unlock()
 	return balancer.backends[index]
 }
 
-// reportOf is a backend's own report by index.
 func reportOf(balancer *Balancer, index int) Backend {
 	balancer.mu.Lock()
 	defer balancer.mu.Unlock()
 	return balancer.snapshot(balancer.backends[index])
 }
 
-// A backend that answers is checked on the interval and reported as serving, with
-// the latency of the exchange recorded, because a balancer that never checked
-// anything would report the same for a backend that was answering and one that was
-// not.
 func TestABackendThatAnswersIsCheckedAndReported(t *testing.T) {
 	t.Parallel()
 	backend := startBackend(t, "a")
@@ -55,18 +48,12 @@ func TestABackendThatAnswersIsCheckedAndReported(t *testing.T) {
 	}
 }
 
-// A backend that stops answering leaves service once it has failed as many times
-// as the threshold names, and the report says when it left, so a laboratory can
-// tell a backend that just failed from one that has been out for a while.
 func TestABackendThatStoppedAnsweringIsTakenOutOfService(t *testing.T) {
 	t.Parallel()
 	silent := startSilentBackend(t, "a")
 	working := startBackend(t, "b")
 	balancer := startBalancer(t, testConfig(PolicyRoundRobin, silent.address, working.address))
 
-	// The working backend is a floor under the test: with one silent backend the
-	// balancer is never out of backends, so the draining below is a decision
-	// about the silent one rather than a refusal of everything.
 	eventually(t, "the silent backend to leave service", func() bool {
 		return reportOf(balancer, 0).State == StateDraining
 	})
@@ -87,18 +74,12 @@ func TestABackendThatStoppedAnsweringIsTakenOutOfService(t *testing.T) {
 	if stats := balancer.Stats(); stats.Draining != 1 || stats.Healthy != 1 {
 		t.Errorf("stats = %+v, want one draining and one healthy backend", stats)
 	}
-	// The client that arrives now is served by the one that is still answering,
-	// because a balancer that gave up on everything would be a different thing.
+
 	if served := servedBy(t, balancer, "still answered"); served != "b" {
 		t.Errorf("the client was served by %q, want the backend that is still answering", served)
 	}
 }
 
-// A check is a real exchange with its own deadline, and one backend that never
-// answers must not cost the others their checks. The interval here is longer than
-// the timeout, so a balancer that checked its backends in turn would spend every
-// pass waiting on the silent one and would have checked the working one hardly at
-// all.
 func TestACheckThatIsNeverAnsweredCostsOnlyItsOwnBackend(t *testing.T) {
 	t.Parallel()
 	silent := startSilentBackend(t, "a")
@@ -123,9 +104,6 @@ func TestACheckThatIsNeverAnsweredCostsOnlyItsOwnBackend(t *testing.T) {
 	}
 }
 
-// A single failure is not enough, and a threshold is a run of failures rather than
-// a total: a backend that fails once in a long while still has to leave service,
-// and one that failed once an hour ago is not out of service this minute.
 func TestTheFailureThresholdIsARunOfFailures(t *testing.T) {
 	t.Parallel()
 	balancer := mustBalancer(t, testConfig(PolicyRoundRobin, "127.0.0.1:9201"))
@@ -143,19 +121,13 @@ func TestTheFailureThresholdIsARunOfFailures(t *testing.T) {
 	if got := reportOf(balancer, 0).State; got != StateDraining {
 		t.Errorf("the backend is %s after %d failures, want %s", got, threshold, StateDraining)
 	}
-	// A success breaks the run of failures even while the backend is out of
-	// service, so a backend that comes back is not already at its threshold from
-	// the failures that took it out. It is not serving yet either: recovery has a
-	// threshold of its own, which the recovery test below is about.
+
 	balancer.record(entry, nil, time.Millisecond, true)
 	if report := reportOf(balancer, 0); report.Consecutive != 0 {
 		t.Errorf("after one success the run of failures is %d, want 0", report.Consecutive)
 	}
 }
 
-// A failure that live traffic found is evidence too, and it is counted apart from
-// the checks, so a laboratory can tell traffic that broke from a check that failed
-// while nothing was being sent.
 func TestAFailureFoundByLiveTrafficIsCountedApartFromTheChecks(t *testing.T) {
 	t.Parallel()
 	balancer := mustBalancer(t, testConfig(PolicyRoundRobin, "127.0.0.1:9202"))
@@ -177,28 +149,24 @@ func TestAFailureFoundByLiveTrafficIsCountedApartFromTheChecks(t *testing.T) {
 	}
 }
 
-// A backend that comes back is put back into service only after it has answered
-// as many times as the recovery threshold names, and a backend that answers once
-// and fails again is not a backend that recovered.
 func TestRecoveryTakesMoreThanOneSuccess(t *testing.T) {
 	t.Parallel()
 	balancer := mustBalancer(t, testConfig(PolicyRoundRobin, "127.0.0.1:9203"))
 	entry := backendEntry(balancer, 0)
 	limits := balancer.Limits()
-	// Two failures in a row, which is a run, take it out of service.
+
 	balancer.recordFailure(entry, errors.New("not answering"), false)
 	balancer.recordFailure(entry, errors.New("not answering"), false)
 	if got := reportOf(balancer, 0).State; got != StateDraining {
 		t.Fatalf("state = %s, want %s", got, StateDraining)
 	}
-	// One success is not a recovery.
+
 	balancer.record(entry, nil, 2*time.Millisecond, true)
 	if report := reportOf(balancer, 0); report.State != StateDraining {
 		t.Errorf("state = %s after one success, want %s: recovery takes %d successes",
 			report.State, StateDraining, limits.RecoveryThreshold)
 	}
-	// One failure resets the run of successes, so a backend that is failing again
-	// cannot recover one answer at a time.
+
 	balancer.recordFailure(entry, errors.New("not answering"), false)
 	balancer.record(entry, nil, time.Millisecond, true)
 	if report := reportOf(balancer, 0); report.State != StateDraining {
@@ -226,8 +194,6 @@ func TestRecoveryTakesMoreThanOneSuccess(t *testing.T) {
 	}
 }
 
-// A backend that has gone away and comes back is put back into service by its own
-// health checks, and clients reach it again afterwards, with the recovery counted.
 func TestABackendThatComesBackIsUsedAgain(t *testing.T) {
 	t.Parallel()
 	backend := startBackend(t, "a")
@@ -253,9 +219,6 @@ func TestABackendThatComesBackIsUsedAgain(t *testing.T) {
 	}
 }
 
-// A backend that is draining keeps the conversations it already has, because
-// cutting off work that is still arriving is the one thing a load balancer must not
-// do, and the drain timeout is the deadline that stops the patience being for ever.
 func TestADrainingBackendKeepsTheConnectionsItAlreadyHolds(t *testing.T) {
 	t.Parallel()
 	backend := startBackend(t, "a")
@@ -265,8 +228,6 @@ func TestADrainingBackendKeepsTheConnectionsItAlreadyHolds(t *testing.T) {
 	conn := dial(t, balancer)
 	roundTrip(t, conn, "while it was serving")
 
-	// The backend is taken out of service by two failures, which is the same thing
-	// a failed check does, and it is still answering.
 	entry := backendEntry(balancer, 0)
 	balancer.recordFailure(entry, errors.New("not answering"), false)
 	balancer.recordFailure(entry, errors.New("not answering"), false)
@@ -276,7 +237,7 @@ func TestADrainingBackendKeepsTheConnectionsItAlreadyHolds(t *testing.T) {
 	if report := reportOf(balancer, 0); report.Active != 1 {
 		t.Errorf("active = %d, want 1: a connection that is already running is not cut off", report.Active)
 	}
-	// The backend is answering, so the conversation continues through the drain.
+
 	for range 3 {
 		answer := roundTrip(t, conn, "still talking")
 		if answer != "a|still talking" {
@@ -291,8 +252,6 @@ func TestADrainingBackendKeepsTheConnectionsItAlreadyHolds(t *testing.T) {
 	}
 }
 
-// The drain timeout is what ends a drain that the backend never finishes, and the
-// connection is closed rather than left to time out on its own.
 func TestADrainTimeoutClosesTheConnectionsItWasHolding(t *testing.T) {
 	t.Parallel()
 	silent := startSilentBackend(t, "a")
@@ -301,8 +260,7 @@ func TestADrainTimeoutClosesTheConnectionsItWasHolding(t *testing.T) {
 	balancer := startBalancer(t, config)
 
 	conn := dial(t, balancer)
-	// A silent backend never answers, so this exchange is what puts a session in
-	// place before the drain closes it.
+
 	if _, err := conn.Write(contextTODO(), []byte("hello")); err != nil {
 		t.Fatalf("Write() = %v, want nil", err)
 	}
@@ -311,17 +269,12 @@ func TestADrainTimeoutClosesTheConnectionsItWasHolding(t *testing.T) {
 		return reportOf(balancer, 0).State == StateDraining
 	})
 
-	// The drain deadline is enforced on the health tick, so the connection is
-	// closed on the first tick after it rather than exactly on it.
 	ctx, cancel := contextWithTimeout(10 * time.Second)
 	defer cancel()
 	if _, err := conn.Read(ctx); err == nil {
 		t.Fatal("Read() after the drain timeout = nil, want the connection to have been closed")
 	}
-	// The drain is counted under the lock and the connections it closed are
-	// halted after it, so the two numbers settle a moment apart. The connection
-	// is gone once the client sees the close, so waiting is waiting for the
-	// balancer to finish the work it already reported doing.
+
 	eventually(t, "the drained connection to be given back", func() bool {
 		return reportOf(balancer, 0).Active == 0 && balancer.Stats().Active == 0
 	})
@@ -330,13 +283,9 @@ func TestADrainTimeoutClosesTheConnectionsItWasHolding(t *testing.T) {
 	}
 }
 
-// A drain whose deadline has been consumed does not close the same connection
-// again, and a backend that stays down is not counted as having drained the same
-// work on every tick after the deadline.
 func TestAnExpiredDrainIsNotCountedTwice(t *testing.T) {
 	t.Parallel()
-	// A silent backend keeps failing, so it stays out of service and its drain
-	// deadline is spent once rather than being re-armed by each failure.
+
 	silent := startSilentBackend(t, "a")
 	config := testConfig(PolicyRoundRobin, silent.address)
 	config.Limits.DrainTimeout = 150 * time.Millisecond
@@ -353,7 +302,7 @@ func TestAnExpiredDrainIsNotCountedTwice(t *testing.T) {
 	if report := reportOf(balancer, 0); report.Active != 0 {
 		t.Errorf("active = %d, want 0 once the drain has closed it", report.Active)
 	}
-	// Several more ticks pass, each of which finds the deadline consumed.
+
 	time.Sleep(4 * config.Limits.HealthInterval)
 	after := reportOf(balancer, 0)
 	if after.Drained != 1 {
@@ -367,8 +316,6 @@ func TestAnExpiredDrainIsNotCountedTwice(t *testing.T) {
 	_ = conn.Close()
 }
 
-// A backend that is serving holds no deadline, so a check that happens to fail
-// late in a run of successes cannot close the work it is still answering.
 func TestAServingBackendHoldsNoDrainDeadline(t *testing.T) {
 	t.Parallel()
 	balancer := mustBalancer(t, testConfig(PolicyRoundRobin, "127.0.0.1:9204"))

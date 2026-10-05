@@ -10,8 +10,6 @@ import (
 	"github.com/netforge/netforge/internal/apperr"
 )
 
-// controlConfig builds a configuration whose balancer reads a control document
-// written into a directory the test owns.
 func controlConfig(t *testing.T, backend string) (Config, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -45,7 +43,6 @@ func TestARemovedBackendStopsTakingClients(t *testing.T) {
 	config.Backends = []string{a.address, b.address}
 	balancer := startBalancer(t, config)
 
-	// Both backends serve before the command.
 	if got := appliedState(balancer, 0); got != StateHealthy {
 		t.Fatalf("state = %q, want %q", got, StateHealthy)
 	}
@@ -57,8 +54,6 @@ func TestARemovedBackendStopsTakingClients(t *testing.T) {
 		return appliedState(balancer, 0) == StateRemoved
 	})
 
-	// The remaining backend takes every client, which is the point of removing
-	// one: the balancer keeps serving with what is left.
 	for range 4 {
 		if name, _, _ := strings.Cut(servedBy(t, balancer, "after removal"), "|"); name != "b" {
 			t.Fatalf("a client was served by %q, want the backend that was left", name)
@@ -71,9 +66,7 @@ func TestARemovedBackendStopsTakingClients(t *testing.T) {
 
 func TestARemovedBackendStaysOutEvenWhenItAnswers(t *testing.T) {
 	t.Parallel()
-	// A backend that is perfectly healthy is removed on purpose. The health
-	// checks keep running against the rest, and a passing check must not put it
-	// back: otherwise removal could not be relied on at all.
+
 	a := startBackend(t, "a")
 	b := startBackend(t, "b")
 	config, control := controlConfig(t, a.address)
@@ -91,7 +84,7 @@ func TestARemovedBackendStaysOutEvenWhenItAnswers(t *testing.T) {
 	if got := appliedState(balancer, 0); got != StateRemoved {
 		t.Errorf("state = %q after several health checks, want %q", got, StateRemoved)
 	}
-	// It is not checked at all while it is out, so the check count stops.
+
 	before := reportOf(balancer, 0).Checks
 	time.Sleep(2 * config.Limits.HealthInterval)
 	if after := reportOf(balancer, 0).Checks; after != before {
@@ -114,8 +107,7 @@ func TestARemovedBackendComesBackAfterAHealthCheck(t *testing.T) {
 			{Seq: 2, Operation: OpRestoreBackend, Backend: a.address},
 		},
 	})
-	// A restored backend is not declared healthy: it has to be proven again, so
-	// it serves once the checks have passed rather than the moment it was named.
+
 	eventually(t, "the restored backend to serve again", func() bool {
 		return appliedState(balancer, 0) == StateHealthy
 	})
@@ -139,8 +131,7 @@ func TestADrainStopsNewClientsAndIsNotARemoval(t *testing.T) {
 	if stats := balancer.Stats(); stats.Removed != 0 {
 		t.Errorf("removed = %d after a drain, want 0: a drain is not a removal", stats.Removed)
 	}
-	// Re-enabling cancels the drain, and the backend serves again without
-	// waiting for a health check, because nothing about it changed.
+
 	write(t, control, Control{
 		Experiment: "nf-test-0001",
 		Commands:   []Command{{Seq: 2, Operation: OpReEnableBackend, Backend: a.address}},
@@ -163,8 +154,7 @@ func TestReEnableRefusesARemovedBackend(t *testing.T) {
 			{Seq: 2, Operation: OpReEnableBackend, Backend: a.address},
 		},
 	})
-	// The second command is refused, the first stands, and the balancer keeps
-	// serving. A refusal has to be visible rather than swallowed.
+
 	eventually(t, "the refusal to be reported", func() bool {
 		status := balancer.Status()
 		return strings.Contains(status.ControlError, "restore_backend")
@@ -225,8 +215,7 @@ func TestCommandsAreAppliedOnce(t *testing.T) {
 	b := startBackend(t, "b")
 	config, control := controlConfig(t, a.address)
 	config.Backends = []string{a.address, b.address}
-	// A long drain timeout, so a second application of the same drain would be
-	// visible as the deadline being pushed out again.
+
 	config.Limits.DrainTimeout = 30 * time.Second
 	balancer := startBalancer(t, config)
 
@@ -240,8 +229,6 @@ func TestCommandsAreAppliedOnce(t *testing.T) {
 	})
 	first := reportOf(balancer, 0).DrainingSince
 
-	// The controller retries, which is what a controller does when it did not
-	// see the effect it asked for.
 	write(t, control, document)
 	write(t, control, document)
 	if got := balancer.Applied(); got != 7 {
@@ -257,8 +244,7 @@ func TestAMissingControlDocumentIsNotAnError(t *testing.T) {
 	a := startBackend(t, "a")
 	config, _ := controlConfig(t, a.address)
 	balancer := startBalancer(t, config)
-	// The file is never written, which is the ordinary case for a laboratory
-	// that does not want to change anything.
+
 	time.Sleep(2 * config.Limits.HealthInterval)
 	if got := balancer.Status().ControlError; got != "" {
 		t.Errorf("control error = %q, want none", got)
@@ -285,7 +271,7 @@ func TestABrokenControlDocumentIsRefusedAndReportedOnce(t *testing.T) {
 	if again := balancer.Status().ControlError; again != first {
 		t.Errorf("the refusal changed from %q to %q, want the same document reported once", first, again)
 	}
-	// A balancer whose controller is broken still serves the connections it has.
+
 	if got := appliedState(balancer, 0); got != StateHealthy {
 		t.Errorf("state = %q, want the backend untouched", got)
 	}

@@ -13,12 +13,9 @@ import (
 )
 
 const (
-	// CeilingFaults is the largest number of faults one configuration may
-	// declare. It matches the largest fault list the engine will hold.
 	CeilingFaults = chaos.CeilingFaults
 )
 
-// FaultType names a kind of fault in configuration.
 type FaultType string
 
 const (
@@ -30,7 +27,6 @@ const (
 	FaultReordering  FaultType = "reordering"
 )
 
-// FaultDirection names which side of a link a fault sits on.
 type FaultDirection string
 
 const (
@@ -40,7 +36,6 @@ const (
 
 func (t FaultType) String() string { return string(t) }
 
-// unit names the unit that value is written in for this fault type.
 func (t FaultType) unit() string {
 	switch t {
 	case FaultLatency, FaultJitter:
@@ -67,51 +62,35 @@ func (d FaultDirection) valid() bool {
 	return d == DirectionOut || d == DirectionIn
 }
 
-// FaultSpec is one declared fault.
-//
-// The type of a fault decides what value means and which of the optional fields
-// belong to it, so a fault cannot carry a field its type has no use for. A
-// bandwidth fault with a jitter on it is a mistake in the file, and it is
-// reported rather than quietly dropped.
 type FaultSpec struct {
-	// Target is the namespace that feels the fault. It must be one of the
-	// namespaces in scope.
 	Target string `yaml:"target"`
-	// Interface is the data interface of the target. When empty the engine
-	// resolves the single data interface of the namespace.
+
 	Interface string `yaml:"interface,omitempty"`
-	// Type is the kind of fault to inject.
+
 	Type FaultType `yaml:"type"`
-	// Direction selects which side of the link is impaired.
+
 	Direction FaultDirection `yaml:"direction,omitempty"`
-	// Value is the fault's main number, written in the unit that Type asks
-	// for. It is kept as written so the file and the record agree.
+
 	Value string `yaml:"value"`
-	// Delay is the base delay for a jitter or a reordering fault. Both need
-	// one, because there is nothing to jitter or to reorder against without a
-	// delay to sit behind.
+
 	Delay Duration `yaml:"delay,omitempty"`
-	// Jitter is unused: the jitter of a jitter fault is its value.
-	// Correlation is how strongly the fault's events bunch together.
+
 	Correlation Percent `yaml:"correlation,omitempty"`
-	// Gap is how many packets a reordering fault skips over.
+
 	Gap int `yaml:"gap,omitempty"`
-	// Queue is the netem queue depth.
+
 	Queue int `yaml:"queue,omitempty"`
-	// Duration bounds how long the fault may live.
+
 	Duration Duration `yaml:"duration,omitempty"`
 
-	// value holds value after it has been read in the unit the type asks for.
 	value FaultValue
 }
 
-// FaultValue is a fault's main number once it has been read.
 type FaultValue struct {
-	// time is set for a latency or jitter fault.
 	time Duration
-	// percent is set for a packet loss, duplication or reordering fault.
+
 	percent Percent
-	// rate is set for a bandwidth fault.
+
 	rate Bandwidth
 }
 
@@ -141,10 +120,6 @@ func (v FaultValue) String() string {
 	}
 }
 
-// UnmarshalYAML reads one fault. It reads the fields itself rather than letting
-// the decoder fill the struct, because the meaning of value depends on type and
-// because a hand written reader is the only way to keep refusing fields the
-// type has no use for.
 func (f *FaultSpec) UnmarshalYAML(node *yaml.Node) error {
 	const op = "config.FaultSpec"
 	if node == nil || node.Kind != yaml.MappingNode {
@@ -200,11 +175,9 @@ func (f *FaultSpec) UnmarshalYAML(node *yaml.Node) error {
 		}
 	}
 
-	// The unit of value follows the type, so the type has to be read first.
 	return f.readValue(op)
 }
 
-// readValue reads value in the unit the fault type asks for.
 func (f *FaultSpec) readValue(op string) error {
 	if !f.Type.valid() {
 		return apperr.InvalidArgument(op, fmt.Sprintf(
@@ -236,9 +209,6 @@ func (f *FaultSpec) readValue(op string) error {
 	return nil
 }
 
-// MarshalYAML writes a fault back out. The gap and the queue are plain counts,
-// so they are written as quoted strings to match what the reader insists on;
-// every other field already carries its unit.
 func (f FaultSpec) MarshalYAML() (any, error) {
 	out := map[string]any{
 		"target": f.Target,
@@ -269,9 +239,6 @@ func (f FaultSpec) MarshalYAML() (any, error) {
 	return out, nil
 }
 
-// Translate turns a declared fault into the specification the engine applies.
-// The result has already been checked against the limits, so a fault that
-// survived decoding cannot be refused later, at the moment it would take effect.
 func (f FaultSpec) Translate(limits Limits) (chaos.Spec, error) {
 	const op = "config.FaultSpec.Translate"
 
@@ -310,8 +277,6 @@ func (f FaultSpec) Translate(limits Limits) (chaos.Spec, error) {
 	return checked, nil
 }
 
-// messageOf reports why a specification was refused, without repeating the
-// operation the fault engine was called with.
 func messageOf(err error) string {
 	var reported *apperr.Error
 	if errors.As(err, &reported) {
@@ -320,8 +285,6 @@ func messageOf(err error) string {
 	return err.Error()
 }
 
-// chaosLimits carries the configuration limits into the fault engine, so a
-// configuration cannot ask for more than the limits it declared.
 func chaosLimits(limits Limits) chaos.Limits {
 	return chaos.Limits{
 		MaxFaults:    CeilingFaults,
@@ -333,15 +296,12 @@ func chaosLimits(limits Limits) chaos.Limits {
 	}
 }
 
-// Ceilings the configuration shares with the fault engine.
 const (
 	CeilingLatency = chaos.CeilingLatency
 	CeilingQueue   = chaos.CeilingQueue
 	CeilingGap     = chaos.CeilingGap
 )
 
-// checkFields refuses the optional fields that the fault's type has no use
-// for, so a mistyped fault is reported rather than quietly half applied.
 func (f FaultSpec) checkFields(op, field string) []error {
 	var problems []error
 	unused := func(name string) {
@@ -406,7 +366,6 @@ func (f FaultSpec) checkFields(op, field string) []error {
 	return problems
 }
 
-// validate checks one fault against the scope and the limits.
 func (f FaultSpec) validate(scope Scope, limits Limits) []error {
 	const op = "config.validate"
 	field := "faults"

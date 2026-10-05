@@ -11,9 +11,6 @@ import (
 	"github.com/netforge/netforge/internal/probe"
 )
 
-// scriptedProber answers from a script: each protocol has a list of results
-// handed out in order, so a test can say what the wire did. A protocol with no
-// script is a laboratory problem, which is itself worth testing.
 type scriptedProber struct {
 	mu      sync.Mutex
 	script  map[probe.Protocol][]probe.Result
@@ -65,7 +62,6 @@ func (p *scriptedProber) count(protocol probe.Protocol) int {
 	return total
 }
 
-// ok is a successful measurement of a protocol.
 func ok(protocol probe.Protocol) probe.Result {
 	result := probe.Result{Protocol: protocol, OK: true, RTT: 3 * time.Millisecond}
 	switch protocol {
@@ -82,7 +78,6 @@ func ok(protocol probe.Protocol) probe.Result {
 	return result
 }
 
-// failed is a measurement that did not get its answer.
 func failed(protocol probe.Protocol, failure probe.Failure, message string) probe.Result {
 	return probe.Result{
 		Protocol: protocol,
@@ -92,7 +87,6 @@ func failed(protocol probe.Protocol, failure probe.Failure, message string) prob
 	}
 }
 
-// scriptedRoutes answers routing questions from a script keyed by target.
 type scriptedRoutes struct {
 	routes map[string]Route
 	err    error
@@ -135,7 +129,6 @@ func newInvestigator(t *testing.T, prober Prober, routes RouteReader, limits Lim
 	return engine
 }
 
-// A missing route is the kernel's own answer, so it can be confirmed.
 func TestAMissingRouteIsConfirmed(t *testing.T) {
 	t.Parallel()
 	prober := &scriptedProber{script: map[probe.Protocol][]probe.Result{
@@ -168,8 +161,6 @@ func TestAMissingRouteIsConfirmed(t *testing.T) {
 	}
 }
 
-// A port that refuses is a positive answer from the host: the path works and
-// nothing is listening. Measured twice, that is confirmed.
 func TestARefusedPortIsConfirmedWhenItReproduces(t *testing.T) {
 	t.Parallel()
 	prober := &scriptedProber{script: map[probe.Protocol][]probe.Result{
@@ -201,15 +192,12 @@ func TestARefusedPortIsConfirmedWhenItReproduces(t *testing.T) {
 		t.Errorf("the failing layer was measured %d times, want 2",
 			prober.count(probe.ProtocolTCP))
 	}
-	// The healthy layer below has to be in the evidence, or the refusal would
-	// prove nothing about the path.
+
 	if !hasWorking(report, layerNetwork) {
 		t.Error("the network layer was not measured working, so the refusal proves nothing")
 	}
 }
 
-// Measured once, a refusal is probable rather than confirmed: a port can refuse
-// for a moment.
 func TestARefusedPortMeasuredOnceIsOnlyProbable(t *testing.T) {
 	t.Parallel()
 	prober := &scriptedProber{script: map[probe.Protocol][]probe.Result{
@@ -230,8 +218,6 @@ func TestARefusedPortMeasuredOnceIsOnlyProbable(t *testing.T) {
 	}
 }
 
-// A resolver that answers with a code, under a working path, is a DNS failure
-// and not a network one.
 func TestAResolverFailureIsADNSFailure(t *testing.T) {
 	t.Parallel()
 	prober := &scriptedProber{script: map[probe.Protocol][]probe.Result{
@@ -261,8 +247,6 @@ func TestAResolverFailureIsADNSFailure(t *testing.T) {
 	}
 }
 
-// A timeout at a layer whose lower layers work could be a slow server or a
-// broken one, and the evidence cannot tell them apart.
 func TestATimeoutAtALayerIsNotConfirmed(t *testing.T) {
 	t.Parallel()
 	prober := &scriptedProber{script: map[probe.Protocol][]probe.Result{
@@ -288,8 +272,6 @@ func TestATimeoutAtALayerIsNotConfirmed(t *testing.T) {
 	}
 }
 
-// A server that answers with a status the caller did not want is a specific
-// answer, which is evidence about the HTTP layer rather than a guess.
 func TestAnUnexpectedStatusIsConfirmed(t *testing.T) {
 	t.Parallel()
 	bad := failed(probe.ProtocolHTTP, probe.FailureHTTP, "HTTP 503")
@@ -313,7 +295,6 @@ func TestAnUnexpectedStatusIsConfirmed(t *testing.T) {
 	}
 }
 
-// A TLS handshake that fails under a working path is a TLS failure.
 func TestATLSHandshakeFailureIsATLSFailure(t *testing.T) {
 	t.Parallel()
 	handshake := failed(probe.ProtocolTLS, probe.FailureTLS,
@@ -340,7 +321,6 @@ func TestATLSHandshakeFailureIsATLSFailure(t *testing.T) {
 	}
 }
 
-// Loss on a path that otherwise works is a degradation, not a broken layer.
 func TestMeasuredLossIsADegradation(t *testing.T) {
 	t.Parallel()
 	lossy := ok(probe.ProtocolICMP)
@@ -371,11 +351,6 @@ func TestMeasuredLossIsADegradation(t *testing.T) {
 	}
 }
 
-// A probe that got no reply at all has not measured how much the path drops. It
-// has measured that nothing arrived, which a dead host produces too, and its
-// loss figure is the hundred percent the probe assumed rather than a
-// measurement. Reading that as a degradation puts a number in the summary that
-// looks measured and is not.
 func TestNoRepliesIsNotAMeasuredDegradation(t *testing.T) {
 	t.Parallel()
 	blackout := failed(probe.ProtocolICMP, probe.FailureTimeout, "no reply to any of the 10 echo requests")
@@ -383,10 +358,7 @@ func TestNoRepliesIsNotAMeasuredDegradation(t *testing.T) {
 	blackout.Detail = "0 of 10 replies, 100.0% loss"
 	prober := &scriptedProber{script: map[probe.Protocol][]probe.Result{
 		probe.ProtocolICMP: {blackout, blackout},
-		// The layers above the network are measured working, which is what keeps
-		// the report from concluding that nothing answered anywhere and naming no
-		// layer at all: the fault is in this one measurement, and the report has
-		// to say that rather than measure a loss it never saw.
+
 		probe.ProtocolTCP:  {ok(probe.ProtocolTCP)},
 		probe.ProtocolHTTP: {ok(probe.ProtocolHTTP)},
 	}}
@@ -409,8 +381,6 @@ func TestNoRepliesIsNotAMeasuredDegradation(t *testing.T) {
 	}
 }
 
-// Nothing answering anywhere is consistent with a host that is down and with a
-// path that drops. Saying which would be a guess.
 func TestNothingAnsweringIsNotResolvedIntoOneLayer(t *testing.T) {
 	t.Parallel()
 	silent := func(protocol probe.Protocol) probe.Result {
@@ -433,15 +403,13 @@ func TestNothingAnsweringIsNotResolvedIntoOneLayer(t *testing.T) {
 	if !strings.Contains(report.Summary, "cannot be") {
 		t.Errorf("Summary = %q, want it to say what could not be separated", report.Summary)
 	}
-	// Both explanations have to be in the report, because either could be true.
+
 	if !mentionsLayer(report, layerNetwork) || !mentionsLayer(report, layerRouting) {
 		t.Errorf("the hypotheses are %v, want both a network and a routing explanation considered",
 			layersOf(report))
 	}
 }
 
-// A failure that does not come back is an intermittent fault, and no layer can
-// be named for it.
 func TestAFailureThatDoesNotReproduceNamesNoLayer(t *testing.T) {
 	t.Parallel()
 	prober := &scriptedProber{script: map[probe.Protocol][]probe.Result{
@@ -466,9 +434,6 @@ func TestAFailureThatDoesNotReproduceNamesNoLayer(t *testing.T) {
 	}
 }
 
-// A measurement that could not be taken is not a measurement that found
-// nothing. If it were read the second way, every refused probe would look like
-// evidence of a broken layer.
 func TestARefusedMeasurementIsNotAWorkingLayerOrAFailingOne(t *testing.T) {
 	t.Parallel()
 	given := Evidence{Attempted: true, Note: "the measurement could not be taken: refused"}
@@ -490,8 +455,6 @@ func TestARefusedMeasurementIsNotAWorkingLayerOrAFailingOne(t *testing.T) {
 	}
 }
 
-// A measurement that could not be taken says nothing about the network, and
-// the report has to say that rather than blame a layer.
 func TestAMeasurementThatCouldNotBeTakenConcludesNothing(t *testing.T) {
 	t.Parallel()
 	prober := &scriptedProber{
@@ -515,7 +478,6 @@ func TestAMeasurementThatCouldNotBeTakenConcludesNothing(t *testing.T) {
 	}
 }
 
-// Every claim in a report has to point at evidence that exists.
 func TestEveryClaimCitesEvidenceThatExists(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -605,7 +567,6 @@ func TestEveryClaimCitesEvidenceThatExists(t *testing.T) {
 	}
 }
 
-// The investigation is bounded: it runs out of probes rather than continuing.
 func TestAnInvestigationIsBounded(t *testing.T) {
 	t.Parallel()
 	prober := &scriptedProber{script: map[probe.Protocol][]probe.Result{
@@ -630,8 +591,6 @@ func TestAnInvestigationIsBounded(t *testing.T) {
 	}
 }
 
-// An observation that names nothing measurable is refused before any probe
-// runs on its behalf.
 func TestAnUnusableObservationIsRefused(t *testing.T) {
 	t.Parallel()
 	prober := &scriptedProber{}
@@ -665,8 +624,6 @@ func TestAnUnusableObservationIsRefused(t *testing.T) {
 	}
 }
 
-// An investigator that cannot measure or cannot ask about routes is not an
-// investigator, and says so rather than guessing later.
 func TestAnInvestigatorNeedsBothTools(t *testing.T) {
 	t.Parallel()
 	if _, err := New(nil, &scriptedRoutes{}, Limits{}); err == nil {
@@ -677,8 +634,6 @@ func TestAnInvestigatorNeedsBothTools(t *testing.T) {
 	}
 }
 
-// The probes an investigation runs stay inside the namespace and the target of
-// the observation, so a diagnosis cannot reach outside the laboratory.
 func TestProbesStayInsideTheObservation(t *testing.T) {
 	t.Parallel()
 	prober := &scriptedProber{script: map[probe.Protocol][]probe.Result{
@@ -712,7 +667,7 @@ func TestProbesStayInsideTheObservation(t *testing.T) {
 				request.Experiment, given.Experiment)
 		}
 	}
-	// A layer below the failure must not carry the failing layer's expectations.
+
 	for _, request := range prober.calls {
 		if request.Protocol == probe.ProtocolICMP {
 			if request.Name != "" || request.Path != "" || request.Port != 0 {
@@ -723,8 +678,6 @@ func TestProbesStayInsideTheObservation(t *testing.T) {
 	}
 }
 
-// The clamp is the last line of defence, so it is tested directly rather than
-// only through the rules that happen to pass it.
 func TestTheClampRefusesToOverclaim(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -785,8 +738,6 @@ func TestTheClampRefusesToOverclaim(t *testing.T) {
 	}
 }
 
-// A report opens with the classification it settled on, never with the level a
-// rule reached for before the clamp took it away.
 func TestASummaryNeverDisagreesWithItsClassification(t *testing.T) {
 	t.Parallel()
 	report := Report{
@@ -802,7 +753,7 @@ func TestASummaryNeverDisagreesWithItsClassification(t *testing.T) {
 	if !strings.HasPrefix(report.Summary, string(report.Diagnosis)+":") {
 		t.Errorf("Summary = %q, want it to open with %s", report.Summary, report.Diagnosis)
 	}
-	// A report that concluded nothing still says so rather than going quiet.
+
 	empty := Report{Diagnosis: Unknown}
 	if got := summarise(&empty, ""); !strings.Contains(got, string(Unknown)) {
 		t.Errorf("summarise() = %q, want it to say the evidence supports nothing", got)
@@ -835,7 +786,6 @@ func layersOf(report Report) []string {
 	return out
 }
 
-// citedIndexes reads the evidence indexes a summary refers to.
 func citedIndexes(summary string) []int {
 	var out []int
 	for _, part := range strings.Split(summary, ",") {

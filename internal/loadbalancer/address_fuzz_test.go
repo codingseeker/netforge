@@ -5,13 +5,8 @@ import (
 	"testing"
 )
 
-// A backend address is parsed rather than resolved, so nothing a document or a peer
-// can put in one should be able to reach past the parser: a name, a prefix, a port
-// out of range, an address that is not a host. The fuzz target is the parse itself,
-// because that is where a document stops being a document.
 func FuzzABackendAddressIsParsedNotResolved(f *testing.F) {
-	// Seeds: what a document may legitimately say, and the shapes that are close
-	// enough to it to be worth trying.
+
 	for _, seed := range []string{
 		"",
 		"10.0.0.1:7000",
@@ -41,17 +36,13 @@ func FuzzABackendAddressIsParsedNotResolved(f *testing.F) {
 	f.Fuzz(func(t *testing.T, address string) {
 		endpoint, err := parseEndpoint("loadbalancer.parseEndpoint", "backend 0", address, false)
 		if err != nil {
-			// A refusal is the only safe answer, and nothing it refused may be
-			// usable: a refused address is not returned to the caller at all.
+
 			if endpoint.IsValid() {
 				t.Fatalf("parseEndpoint(%q) returned %s and an error, want an unusable address", address, endpoint)
 			}
 			return
 		}
-		// An address that was accepted has to be one a datagram can be sent to: a
-		// host, a real port, and a form the standard parser agrees with. The last is
-		// the point of the target, because the only way a value could be both
-		// accepted and unparsable is if this parser and the standard one disagreed.
+
 		if reparse, parseErr := netip.ParseAddrPort(address); parseErr != nil || reparse != endpoint {
 			t.Errorf("parseEndpoint(%q) = %s, but netip reads it as %s (%v), want the two to agree",
 				address, endpoint, reparse, parseErr)
@@ -69,8 +60,6 @@ func FuzzABackendAddressIsParsedNotResolved(f *testing.F) {
 	})
 }
 
-// The listen address is parsed the same way, except that a zero port is allowed
-// there: it asks the kernel for any port and the balancer reports the one it got.
 func FuzzAListenAddressIsParsedNotResolved(f *testing.F) {
 	for _, seed := range []string{
 		"127.0.0.1:0",

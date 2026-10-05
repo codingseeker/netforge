@@ -6,15 +6,6 @@ import (
 	"testing"
 )
 
-// Phase 14 is the proof that the command line can reach what the laboratory
-// already had. The tests that need a kernel build real namespaces; the ones that
-// only check refusals are in internal/cli, because a refusal that has to create
-// something first is not a refusal.
-//
-// What every test here holds to is the same: the report a run prints has to say
-// what the run built, and it has to say it in a way a reader can check against
-// the host.
-
 const (
 	phase14LabID     = "nfp14"
 	phase14Client    = "nf-client0-" + phase14LabID
@@ -24,8 +15,6 @@ const (
 	phase14ServiceIP = 7000
 )
 
-// phase14Document is a laboratory that fits in one run: one client, one server,
-// one router, and a fault the observation will find.
 func phase14Document(t *testing.T, faults bool) string {
 	t.Helper()
 	document := "name: phase14-cli\n" +
@@ -52,15 +41,6 @@ func phase14Document(t *testing.T, faults bool) string {
 	return document
 }
 
-// phase14Run runs an experiment from the command line and demands it worked. A
-// test that is checking the report cannot proceed on a failed run, and saying so
-// with the run's own output is more useful than asserting a substring is absent.
-//
-// The recovery flags are not incidental. An experiment that injects a fault
-// diagnoses the loss and then verifies that the path came back, so a run with a
-// fault and no authorized recovery fails at the verify step by design. These
-// tests are about what a run builds and reports, so every run carries the
-// recovery its own document implies.
 func phase14Run(t *testing.T, document string, flags ...string) runResult {
 	t.Helper()
 	args := append([]string{
@@ -83,28 +63,16 @@ func phase14Run(t *testing.T, document string, flags ...string) runResult {
 	return result
 }
 
-// TestASoftwareRoutedRunForwardsRealTraffic is the requirement the phase exists
-// for. Before it, a CLI run was always kernel-routed, so a report claiming to
-// measure a software router was describing something the process never built.
-//
-// The proof that the software router forwarded rather than the kernel is in the
-// report: a software-routed run reads ip_forward=0 in the router namespace, and
-// the router's own counters are non-zero. Both halves are checked, because either
-// alone is satisfiable by accident.
 func TestASoftwareRoutedRunForwardsRealTraffic(t *testing.T) {
 	document := writeFile(t, "phase14-software.yaml", phase14Document(t, true))
 	result := phase14Run(t, document, "--routing", "software", "--output", "json",
 		"--protocol", "icmp", "--target", phase14ServerIP)
 
-	// The report is the run's own record, so it is read as data rather than
-	// grepped: a substring check on a JSON document would pass for a key nested
-	// somewhere it has no business being.
 	lab := phase14Laboratory(t, result.stdout)
 	if lab.Routing != "software" {
 		t.Errorf("the report says routing=%q, want software", lab.Routing)
 	}
-	// The kernel forwarded nothing. Without this the run would look like a
-	// software router even if the kernel had been doing the work.
+
 	if lab.KernelForwarding != "0" {
 		t.Errorf("the report says ip_forward=%q in the router namespace, want 0: "+
 			"a software-routed run must prove the kernel forwarded nothing", lab.KernelForwarding)
@@ -118,17 +86,12 @@ func TestASoftwareRoutedRunForwardsRealTraffic(t *testing.T) {
 	if lab.Router.Received == 0 {
 		t.Errorf("the software router received nothing: %+v", *lab.Router)
 	}
-	// A run that claims a software router and also reports a kernel that
-	// forwarded would be self-contradictory, so the counters and the forwarding
-	// flag are asserted against each other.
+
 	if lab.Router.Forwarded > 0 && lab.KernelForwarding != "0" {
 		t.Error("the run reports both a software router forwarding and kernel forwarding on")
 	}
 }
 
-// TestAKernelRoutedRunSaysSoAndLeavesTheKernelForwarding proves the two modes are
-// actually different from outside the process, which is the only way an operator
-// can tell which one a given report describes.
 func TestAKernelRoutedRunSaysSoAndLeavesTheKernelForwarding(t *testing.T) {
 	document := writeFile(t, "phase14-kernel.yaml", phase14Document(t, true))
 	result := phase14Run(t, document, "--routing", "kernel", "--output", "json",
@@ -149,9 +112,6 @@ func TestAKernelRoutedRunSaysSoAndLeavesTheKernelForwarding(t *testing.T) {
 	}
 }
 
-// TestARunReportsWhatItBuilt is the reporting requirement, read as data. A report
-// that says what it measured but not what it measured it on cannot be checked
-// against anything, and the fields here are the ones a reader needs to check it.
 func TestARunReportsWhatItBuilt(t *testing.T) {
 	document := writeFile(t, "phase14-report.yaml", phase14Document(t, true))
 	result := phase14Run(t, document, "--output", "json",
@@ -167,8 +127,7 @@ func TestARunReportsWhatItBuilt(t *testing.T) {
 	if lab.RouterNamespace != phase14Router {
 		t.Errorf("the report names the router namespace %q, want %q", lab.RouterNamespace, phase14Router)
 	}
-	// Every namespace the run created is named with the address it held, so a
-	// reader can match the report against the plan the run was built from.
+
 	byNamespace := map[string]phase14Node{}
 	for _, node := range lab.Nodes {
 		byNamespace[node.Namespace] = node
@@ -197,10 +156,6 @@ func TestARunReportsWhatItBuilt(t *testing.T) {
 	}
 }
 
-// TestAServiceAnswersATCPObservationFromTheCommandLine is the second capability
-// the phase reaches. Before it, a --protocol tcp run from the command line had
-// nothing to answer it; now a listener is asked for, and the run reports what was
-// bound.
 func TestAServiceAnswersATCPObservationFromTheCommandLine(t *testing.T) {
 	document := writeFile(t, "phase14-service.yaml", phase14Document(t, true))
 	result := phase14Run(t, document, "--output", "json",
@@ -216,9 +171,7 @@ func TestAServiceAnswersATCPObservationFromTheCommandLine(t *testing.T) {
 	if service.Namespace != phase14Server {
 		t.Errorf("the service serves from %q, want the server namespace the run measured", service.Namespace)
 	}
-	// The report names what was really bound rather than what was asked for,
-	// which is the difference between an endpoint a probe can find and one a
-	// specification claimed.
+
 	if len(service.Endpoints) == 0 {
 		t.Fatalf("the report names no endpoint for the service in %q", service.Namespace)
 	}
@@ -231,14 +184,8 @@ func TestAServiceAnswersATCPObservationFromTheCommandLine(t *testing.T) {
 	}
 }
 
-// TestTheServicePortsAreChosenByTheCaller proves the arithmetic rather than
-// asserting a single case: the i-th serving namespace binds base+i, so a caller
-// serving three servers knows all three ports without the laboratory having to
-// tell them afterwards.
 func TestTheServicePortsAreChosenByTheCaller(t *testing.T) {
-	// The document declares a fault, as every run here does: an experiment that
-	// impaired nothing has no failure to diagnose, and the diagnose step refuses
-	// one by design rather than reporting a diagnosis of nothing.
+
 	document := writeFile(t, "phase14-ports.yaml", phase14Document(t, true))
 	lab := runAndReadLaboratory(t, document,
 		"--output", "json", "--protocol", "tcp", "--port", "8100",
@@ -252,9 +199,6 @@ func TestTheServicePortsAreChosenByTheCaller(t *testing.T) {
 	}
 }
 
-// TestEveryFlagIsRefusedBeforeAnythingExists is the property that makes the whole
-// phase testable: a run that is refused for its flags has created no namespace and
-// left no state behind. The reconciler listing is what proves the second half.
 func TestEveryFlagIsRefusedBeforeAnythingExists(t *testing.T) {
 	root := t.TempDir()
 	document := writeFile(t, "phase14-refusals.yaml", phase14Document(t, false))
@@ -313,9 +257,7 @@ func TestEveryFlagIsRefusedBeforeAnythingExists(t *testing.T) {
 			if result.stdout != "" {
 				t.Errorf("a refused run printed a report:\n%s", result.stdout)
 			}
-			// Nothing was created, so the reconciler has nothing to find. This is
-			// the check that a refusal is genuinely a refusal and not a run that
-			// cleaned up after itself.
+
 			listing := execNetforgeEnv(t, "", map[string]string{"NETFORGE_STATE_ROOT": root},
 				"reconcile", "list")
 			if listing.exitCode != 0 {
@@ -328,10 +270,6 @@ func TestEveryFlagIsRefusedBeforeAnythingExists(t *testing.T) {
 	}
 }
 
-// TestAFinishedRunLeavesNothingForTheReconciler is the property that makes the
-// reconciler's output a report about crashes rather than about normal operation.
-// A listing that found leftovers after an ordinary run would make every operator
-// distrust it.
 func TestAFinishedRunLeavesNothingForTheReconciler(t *testing.T) {
 	root := t.TempDir()
 	document := writeFile(t, "phase14-clean.yaml", phase14Document(t, true))
@@ -339,8 +277,7 @@ func TestAFinishedRunLeavesNothingForTheReconciler(t *testing.T) {
 
 	for _, routing := range []string{"kernel", "software"} {
 		t.Run(routing, func(t *testing.T) {
-			// A software-routed run creates two state directories rather than
-			// one, so both kinds are exercised by this loop.
+
 			result := execNetforgeEnv(t, "", env, append([]string{
 				"experiment", "run",
 				"--id", phase14LabID,
@@ -369,10 +306,6 @@ func TestAFinishedRunLeavesNothingForTheReconciler(t *testing.T) {
 	}
 }
 
-// phase14RunLaboratory is the shape of the laboratory a report carries. It is
-// declared here rather than imported so that the test asserts against the fields
-// the requirement names instead of against whatever the report package happens
-// to export.
 type phase14Node struct {
 	Role      string `json:"role"`
 	Namespace string `json:"namespace"`
@@ -414,8 +347,6 @@ type phase14RunReport struct {
 	ExperimentID string                   `json:"experiment_id"`
 }
 
-// phase14Laboratory reads the laboratory a run reported, failing the test if the
-// report is not the report of a run that finished and cleaned up.
 func phase14Laboratory(t *testing.T, encoded string) *phase14LaboratoryReport {
 	t.Helper()
 	var report phase14RunReport
@@ -434,7 +365,6 @@ func phase14Laboratory(t *testing.T, encoded string) *phase14LaboratoryReport {
 	return report.Laboratory
 }
 
-// runAndReadLaboratory runs an experiment and returns what it reported building.
 func runAndReadLaboratory(t *testing.T, document string, flags ...string) *phase14LaboratoryReport {
 	t.Helper()
 	return phase14Laboratory(t, phase14Run(t, document, flags...).stdout)

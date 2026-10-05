@@ -10,9 +10,6 @@ import (
 	"time"
 )
 
-// A laboratory learns that a balancer is serving from its status file, and learns
-// afterwards which backend each client went to, so the status has to be a document
-// that can be read while the balancer runs.
 func TestARunningBalancerReportsWhatItIsServing(t *testing.T) {
 	t.Parallel()
 	backends := []*backendServer{startBackend(t, "a"), startBackend(t, "b")}
@@ -35,9 +32,6 @@ func TestARunningBalancerReportsWhatItIsServing(t *testing.T) {
 		}
 	})
 
-	// A client is placed once the status says the balancer is bound, because a
-	// status that claims to be running before it can answer is the answer a
-	// laboratory must not be given.
 	eventually(t, "the balancer to report itself running", func() bool {
 		read, err := ReadStatus(status)
 		return err == nil && read.State == StateRunning
@@ -77,8 +71,7 @@ func TestARunningBalancerReportsWhatItIsServing(t *testing.T) {
 			t.Errorf("backend %s is %s in the status, want %s", entry.Address, entry.State, StateHealthy)
 		}
 	}
-	// The status is rewritten on a tick rather than per decision, so the client is
-	// in it once the next report has been written.
+
 	eventually(t, "the status to report the client that was placed", func() bool {
 		latest, readErr := ReadStatus(status)
 		return readErr == nil && latest.Stats.Served == 1
@@ -102,9 +95,6 @@ func TestARunningBalancerReportsWhatItIsServing(t *testing.T) {
 	}
 }
 
-// A balancer that is stopped writes the state a reader sees after it stopped, and
-// stops cleanly on a cancelled context rather than reporting a failure for having
-// been asked to stop.
 func TestAStoppedBalancerLeavesAStatusThatSaysItStopped(t *testing.T) {
 	t.Parallel()
 	backend := startBackend(t, "a")
@@ -137,9 +127,6 @@ func TestAStoppedBalancerLeavesAStatusThatSaysItStopped(t *testing.T) {
 	}
 }
 
-// A balancer that could not start says so in the status file, because a laboratory
-// waiting for one that is not coming needs to be told why rather than left waiting
-// for a port that will never be bound.
 func TestABalancerThatCannotStartSaysWhyInItsStatus(t *testing.T) {
 	t.Parallel()
 	status := filepath.Join(t.TempDir(), "balancer.json")
@@ -164,15 +151,12 @@ func TestABalancerThatCannotStartSaysWhyInItsStatus(t *testing.T) {
 	}
 }
 
-// The status file is written whole, so a reader that reads it while the balancer is
-// rewriting it gets a document rather than half of one.
 func TestTheStatusFileIsWrittenWhole(t *testing.T) {
 	t.Parallel()
 	status := filepath.Join(t.TempDir(), "nested", "balancer.json")
 	config := testConfig(PolicyRoundRobin, "127.0.0.1:9401")
 	config.StatusPath = status
-	// Nothing is listening on that address, so the balancer starts, fails its
-	// checks and keeps rewriting a status that changes under the reader.
+
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- Serve(ctx, config) }()
@@ -219,16 +203,12 @@ func TestTheStatusFileIsWrittenWhole(t *testing.T) {
 		t.Errorf("%d of %d reads found a half-written document, want none: the file is written whole",
 			counts[1], counts[0]+counts[1])
 	}
-	// The temporary file the write goes through is not left behind next to the
-	// status, or a reader would see two documents where it expects one.
+
 	if _, err := os.Stat(status + ".tmp"); err == nil {
 		t.Error("the temporary status file was left behind, want only the finished one")
 	}
 }
 
-// Reading a status file that is not there, or is not a status, is reported rather
-// than returning an empty status a caller could mistake for a balancer that has
-// said nothing yet.
 func TestReadingAMissingOrBrokenStatusIsReported(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
@@ -251,9 +231,6 @@ func TestReadingAMissingOrBrokenStatusIsReported(t *testing.T) {
 	}
 }
 
-// The agent only starts when it is asked to, and the mode it starts with is the one
-// the laboratory starts it with. An argument list that is not the agent's belongs to
-// whatever else wants it, so the agent says so and leaves the exit code to it.
 func TestTheAgentOnlyStartsWhenItIsAskedTo(t *testing.T) {
 	t.Parallel()
 	for _, args := range [][]string{
@@ -272,8 +249,6 @@ func TestTheAgentOnlyStartsWhenItIsAskedTo(t *testing.T) {
 	}
 }
 
-// A configuration the agent cannot read is refused with a message and a failing exit
-// code, rather than a balancer that serves nothing and reports nothing.
 func TestTheAgentRefusesAConfigurationItCannotRead(t *testing.T) {
 	t.Parallel()
 	handled, code := Dispatch([]string{balancerMode})
@@ -292,8 +267,6 @@ func TestTheAgentRefusesAConfigurationItCannotRead(t *testing.T) {
 	}
 }
 
-// A configuration the agent reads but cannot serve is refused with a failing exit
-// code, and the reason is on the way out rather than only in the status file.
 func TestTheAgentRefusesAConfigurationItCannotServe(t *testing.T) {
 	t.Parallel()
 	document, err := json.Marshal(testConfig(PolicyRoundRobin))
@@ -309,8 +282,6 @@ func TestTheAgentRefusesAConfigurationItCannotServe(t *testing.T) {
 	}
 }
 
-// The report interval is not faster than the health checks it reports, so a status
-// file never costs more than the balancer is checking.
 func TestTheStatusIsNotRewrittenFasterThanTheChecks(t *testing.T) {
 	t.Parallel()
 	fast := testLimits()
@@ -326,8 +297,6 @@ func TestTheStatusIsNotRewrittenFasterThanTheChecks(t *testing.T) {
 	}
 }
 
-// The status names the policy as a document wrote it, and a status read back after
-// the balancer has gone still names it, because that is the record of what was run.
 func TestAStatusKeepsWhatItWasBuiltWith(t *testing.T) {
 	t.Parallel()
 	status := filepath.Join(t.TempDir(), "balancer.json")
@@ -348,14 +317,10 @@ func TestAStatusKeepsWhatItWasBuiltWith(t *testing.T) {
 		if len(read.Backends) != 2 {
 			t.Errorf("the configuration carries %d backends, want 2", len(read.Backends))
 		}
-		// The status file is only written by a balancer that is running, and this
-		// one cannot be: the backends are in a network that does not exist here. The
-		// status is still what a reader has to be able to read back.
+
 	}
 }
 
-// A status a laboratory reads says which backend each client was placed with, and
-// that is the only record of a decision the balancer made in passing.
 func TestAStatusCarriesWhereEachClientWent(t *testing.T) {
 	t.Parallel()
 	backends := []*backendServer{startBackend(t, "a"), startBackend(t, "b"), startBackend(t, "c")}
@@ -368,8 +333,7 @@ func TestAStatusCarriesWhereEachClientWent(t *testing.T) {
 			t.Fatalf("client %d was served by no backend", index)
 		}
 	}
-	// The status a laboratory reads is written by the balancer itself, so it is
-	// written here the same way rather than assembled by the test.
+
 	writeStatus(balancer.config, balancer.Status())
 
 	read, err := ReadStatus(status)

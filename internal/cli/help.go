@@ -76,9 +76,6 @@ func writeCommandHelp(env Env, command *Command) {
 	writeCommandFlags(out, command)
 }
 
-// commandPath is the command as the user types it, so a subcommand is
-// introduced by the command it belongs to rather than by a name that is not a
-// command at all.
 func commandPath(program string, command *Command) string {
 	if command.Parent == "" {
 		return program + " " + command.Name

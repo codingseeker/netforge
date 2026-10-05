@@ -25,59 +25,43 @@ const (
 	servicePoll  = 20 * time.Millisecond
 )
 
-// ServiceSpec asks a laboratory namespace to serve an endpoint set. The
-// namespace has to be one the laboratory created, which is checked before the
-// service is started.
 type ServiceSpec struct {
-	// Namespace is the laboratory namespace that serves the endpoints.
 	Namespace string
-	// TCPPort and UDPPort are the echo endpoints. Zero disables them.
+
 	TCPPort uint16
 	UDPPort uint16
-	// StreamPort is the stream echo endpoint. Zero disables it.
+
 	StreamPort uint16
-	// RUDPPort is the reliable-UDP echo endpoint. Zero disables it.
+
 	RUDPPort uint16
-	// DNSPort is the resolver endpoint. Zero disables it.
+
 	DNSPort uint16
-	// DNSNames maps a name the resolver answers for to the address it answers
-	// with.
+
 	DNSNames map[string]string
-	// TLSPort and HTTPPort are the TLS and HTTP endpoints. Zero disables them.
+
 	TLSPort  uint16
 	HTTPPort uint16
-	// HTTPPrefix is the path the HTTP endpoint serves. It defaults to "/".
+
 	HTTPPrefix string
-	// HTTPStatus is the status the HTTP endpoint answers with.
+
 	HTTPStatus int
-	// HTTPBody is the body the HTTP endpoint answers with.
+
 	HTTPBody string
-	// MaxConnections and MaxRequest bound the service. Zero uses the service
-	// defaults.
+
 	MaxConnections int
 	MaxRequest     int
-	// Timeout bounds one exchange. Zero uses the service default.
+
 	Timeout time.Duration
 }
 
-// serviceProcess is one running service.
 type serviceProcess struct {
 	spec ServiceSpec
 	pid  int
 	path string
-	// bound is what the service reported it was listening on.
+
 	bound []string
 }
 
-// ServiceFor builds the specification for one namespace serving one protocol on
-// one port.
-//
-// The endpoint kind follows the protocol, because the probe that measures it
-// speaks that protocol: a TCP endpoint answers a TCP probe and the TCP half of
-// a TLS or HTTP chain, and an HTTP endpoint answers an HTTP request on the same
-// connection. A protocol with no endpoint NetForge serves is refused rather than
-// mapped to something else, because a laboratory that measured a port nothing
-// was bound to would be reporting a closed port as a measurement.
 func ServiceFor(namespace string, protocol probe.Protocol, port uint16) (ServiceSpec, error) {
 	const op = "network.ServiceFor"
 	if strings.TrimSpace(namespace) == "" {
@@ -103,9 +87,6 @@ func ServiceFor(namespace string, protocol probe.Protocol, port uint16) (Service
 	return spec, nil
 }
 
-// ServiceEndpoints returns what each running service is bound to, which is the
-// answer to "what was listening", asked of the laboratory rather than guessed
-// from the specification it was given.
 func (l *Lab) ServiceEndpoints() []BoundService {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -119,17 +100,12 @@ func (l *Lab) ServiceEndpoints() []BoundService {
 	return out
 }
 
-// BoundService is one running service and the endpoints it reports listening.
 type BoundService struct {
-	// Namespace is the laboratory namespace serving the endpoints.
 	Namespace string
-	// Endpoints are the "protocol/address" strings the service reported, which
-	// is what was really bound rather than what was asked for.
+
 	Endpoints []string
 }
 
-// Services returns the endpoints the laboratory is serving, which is what a
-// diagnosis reads to know what was supposed to be on the far end.
 func (l *Lab) Services() []ServiceSpec {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -140,7 +116,6 @@ func (l *Lab) Services() []ServiceSpec {
 	return out
 }
 
-// ServiceStatus reports what one service says about itself.
 func (l *Lab) ServiceStatus(index int) (service.Status, error) {
 	const op = "network.ServiceStatus"
 	l.mu.Lock()
@@ -163,9 +138,6 @@ func (l *Lab) serviceAt(index int) *serviceProcess {
 	return l.services[index]
 }
 
-// startServices starts every requested service and puts it under the
-// laboratory's ownership, so a teardown stops the listeners before the
-// namespaces they live in disappear.
 func (l *Lab) startServices() error {
 	const op = "network.startServices"
 	if len(l.spec.Services) == 0 {
@@ -183,13 +155,8 @@ func (l *Lab) startServices() error {
 	return nil
 }
 
-// startService starts one service process and hands back its record. It is
-// shared with RestartService so a restarted service is configured, registered
-// for teardown and awaited in exactly the way a first start is: a restart that
-// skipped any of those would leave a listener nothing owns.
 func (l *Lab) startService(op string, index int, spec ServiceSpec) (*serviceProcess, error) {
-	// The same check a probe gets: a service may only be started in a namespace
-	// this laboratory created.
+
 	if err := l.probeScope().Check(op, spec.Namespace, l.plan.Network.Addr().String()); err != nil {
 		return nil, fmt.Errorf("%s: service %d: %w", op, index, err)
 	}
@@ -217,10 +184,7 @@ func (l *Lab) startService(op string, index int, spec ServiceSpec) (*serviceProc
 		pid:  process,
 		path: filepath.Join(l.work, "service-"+strconv.Itoa(index)+".json"),
 	}
-	// Each start registers its own stop. A restart therefore leaves the earlier
-	// stop behind, which costs one signal to a process that has already gone:
-	// stopping a process that is not running is not an error, and the teardown
-	// still stops the process that is.
+
 	if err := l.stack.Defer("service-"+strconv.Itoa(index), func(context.Context) error {
 		return stopService(process)
 	}); err != nil {
@@ -234,13 +198,6 @@ func (l *Lab) startService(op string, index int, spec ServiceSpec) (*serviceProc
 	return record, nil
 }
 
-// RestartService stops a laboratory service and starts it again with the same
-// configuration.
-//
-// It exists for the recovery step that has to prove a service was the problem
-// rather than assume it. Restarting is destructive, so it is only ever reached
-// through an authorized recovery action, and the laboratory refuses a namespace
-// that is not one of its own services.
 func (l *Lab) RestartService(ctx context.Context, namespace string) error {
 	const op = "network.RestartService"
 	if err := apperr.FromContext(ctx, op); err != nil {
@@ -267,7 +224,6 @@ func (l *Lab) RestartService(ctx context.Context, namespace string) error {
 	return nil
 }
 
-// serviceIndex finds the service that runs in a namespace.
 func (l *Lab) serviceIndex(namespace string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -289,8 +245,6 @@ func (l *Lab) servicePID(index int) int {
 	return process.pid
 }
 
-// serviceConfig renders a service specification into a service configuration,
-// filling in the laboratory's own status path and the service defaults.
 func (l *Lab) serviceConfig(index int, spec ServiceSpec) service.Config {
 	defaults := service.DefaultConfig()
 	config := service.Config{
@@ -332,8 +286,6 @@ func (l *Lab) serviceConfig(index int, spec ServiceSpec) service.Config {
 	return config
 }
 
-// awaitService waits for a service to report that its listeners are bound, so
-// a laboratory is never returned before it can answer.
 func (l *Lab) awaitService(record *serviceProcess, space *Space) error {
 	const op = "network.awaitService"
 	deadline := time.Now().Add(serviceReady)
@@ -356,7 +308,6 @@ func (l *Lab) awaitService(record *serviceProcess, space *Space) error {
 	return fmt.Errorf("%s: the service in %s did not become ready within %s", op, record.spec.Namespace, serviceReady)
 }
 
-// stopService asks a service to stop and insists that it does.
 func stopService(pid int) error {
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && err != syscall.ESRCH {
 		return fmt.Errorf("stop the service: %w", err)
@@ -372,12 +323,8 @@ func stopService(pid int) error {
 	return nil
 }
 
-// Prober returns the probe engine of the laboratory, or nil when the laboratory
-// was not created with one.
 func (l *Lab) Prober() *probe.Engine { return l.prober }
 
-// Investigator returns an investigator bound to this laboratory, so a failure
-// inside it is explained from measurements taken inside it.
 func (l *Lab) Investigator(limits investigator.Limits) (*investigator.Investigator, error) {
 	const op = "network.Investigator"
 	if l.prober == nil {
@@ -386,9 +333,6 @@ func (l *Lab) Investigator(limits investigator.Limits) (*investigator.Investigat
 	return investigator.New(l, l, limits)
 }
 
-// Route asks the kernel what it would do to reach a target from a namespace,
-// and reports the answer as the kernel gave it. It is how a diagnosis learns
-// whether a route exists, without guessing from the probes.
 func (l *Lab) Route(_ context.Context, namespace, target string) (investigator.Route, error) {
 	const op = "network.Route"
 	address, err := netip.ParseAddr(target)
@@ -401,11 +345,10 @@ func (l *Lab) Route(_ context.Context, namespace, target string) (investigator.R
 		return investigator.Route{}, err
 	}
 	if code != 0 {
-		// The kernel refusing to route is an answer, not a failure to ask.
+
 		return investigator.Route{Found: false, Reason: strings.TrimSpace(stderr)}, nil
 	}
-	// "203.0.113.7 via 10.57.0.1 dev nfc0 src 10.57.0.2 uid 0". The next hop
-	// and the device are the fields after their names, not part of them.
+
 	route := investigator.Route{Found: true}
 	fields := strings.Fields(stdout)
 	for index := 0; index+1 < len(fields); index++ {
@@ -419,16 +362,12 @@ func (l *Lab) Route(_ context.Context, namespace, target string) (investigator.R
 		}
 	}
 	if route.Device == "" {
-		// A route with no device is not a route the packet can leave by, and
-		// reporting it as one would let a diagnosis blame the wrong layer.
+
 		return investigator.Route{Found: false, Reason: strings.TrimSpace(stdout)}, nil
 	}
 	return route, nil
 }
 
-// Probe runs one protocol probe from inside a laboratory namespace and reports
-// what came back. A probe that fails returns a result that says so, because a
-// failure is the evidence an investigator needs.
 func (l *Lab) Probe(ctx context.Context, request probe.Request) (probe.Result, error) {
 	const op = "network.Probe"
 	if l.prober == nil {

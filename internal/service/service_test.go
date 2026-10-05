@@ -17,8 +17,6 @@ import (
 	"github.com/netforge/netforge/internal/packet"
 )
 
-// testConfig is a small service with one port, so a test can be about one
-// behaviour rather than five.
 func testConfig(t *testing.T, mutate func(*Config)) Config {
 	t.Helper()
 	config := DefaultConfig()
@@ -31,7 +29,6 @@ func testConfig(t *testing.T, mutate func(*Config)) Config {
 	return config
 }
 
-// startService opens a service and closes it when the test ends.
 func startService(t *testing.T, config Config) (*Service, context.CancelFunc) {
 	t.Helper()
 	checked, err := config.Validate()
@@ -50,8 +47,6 @@ func startService(t *testing.T, config Config) (*Service, context.CancelFunc) {
 	return instance, func() {}
 }
 
-// freePort asks the kernel for a port nothing is using. A fixed port would make
-// a test fail for reasons that have nothing to do with the service.
 func freePort(t *testing.T) uint16 {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -62,7 +57,6 @@ func freePort(t *testing.T) uint16 {
 	return uint16(listener.Addr().(*net.TCPAddr).Port)
 }
 
-// dnsQuery encodes a resolver query the way a probe would send it.
 func dnsQuery(t *testing.T, id uint16, name string) []byte {
 	t.Helper()
 	query, err := packet.MarshalQuery(id, name)
@@ -72,8 +66,6 @@ func dnsQuery(t *testing.T, id uint16, name string) []byte {
 	return query
 }
 
-// The status file is how a caller learns that a service is ready, so it has to
-// name the endpoints that are actually bound.
 func TestTheStatusFileNamesWhatIsBound(t *testing.T) {
 	t.Parallel()
 	port := freePort(t)
@@ -153,8 +145,6 @@ func TestTheDNSServiceAnswersForTheNamesItKnows(t *testing.T) {
 		t.Errorf("the answer is %v, want a single 10.60.0.2", message.Answers)
 	}
 
-	// A name it does not know is refused rather than answered with something
-	// plausible.
 	if _, err := conn.Write(dnsQuery(t, 0x4322, "other.lab")); err != nil {
 		t.Fatalf("Write() = %v, want nil", err)
 	}
@@ -177,7 +167,7 @@ func TestTheTLSServiceCompletesAHandshake(t *testing.T) {
 	startService(t, testConfig(t, func(c *Config) { c.TLSPort = port }))
 
 	conn, err := tls.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))),
-		&tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}) //nolint:gosec // the service presents a certificate this test generates.
+		&tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12})
 	if err != nil {
 		t.Fatalf("tls.Dial() = %v, want nil", err)
 	}
@@ -188,8 +178,6 @@ func TestTheTLSServiceCompletesAHandshake(t *testing.T) {
 	}
 }
 
-// An HTTP endpoint answers its own path and refuses the rest, because a probe
-// that gets 404 for everything cannot tell a routing fault from a wrong path.
 func TestTheHTTPServiceAnswersItsPathAndRefusesTheRest(t *testing.T) {
 	t.Parallel()
 	port := freePort(t)
@@ -218,8 +206,6 @@ func TestTheHTTPServiceAnswersItsPathAndRefusesTheRest(t *testing.T) {
 		t.Errorf("the body is %q, want ok", body)
 	}
 
-	// A path below the prefix is still the prefix, which is what a probe
-	// asking for a resource under it expects.
 	response, err = client.Get(address + "/health/detail")
 	if err != nil {
 		t.Fatalf("Get(/health/detail) = %v, want nil", err)
@@ -239,8 +225,6 @@ func TestTheHTTPServiceAnswersItsPathAndRefusesTheRest(t *testing.T) {
 	}
 }
 
-// At the connection limit the answer is a refusal, not a queue: a laboratory
-// must never accumulate work it cannot bound.
 func TestTheConnectionLimitRefusesRatherThanQueues(t *testing.T) {
 	t.Parallel()
 	port := freePort(t)
@@ -256,15 +240,14 @@ func TestTheConnectionLimitRefusesRatherThanQueues(t *testing.T) {
 		t.Fatalf("the first Dial() = %v, want nil", err)
 	}
 	defer func() { _ = held.Close() }()
-	// The slot is taken by the first connection, which the service is holding
-	// open by never reading it.
+
 	_ = held.SetDeadline(time.Now().Add(500 * time.Millisecond))
 	buffer := make([]byte, 16)
 	_, _ = held.Read(buffer)
 
 	second, err := net.DialTimeout("tcp", address, time.Second)
 	if err != nil {
-		return // A refused connection at the limit is also a valid answer.
+		return
 	}
 	defer func() { _ = second.Close() }()
 	_ = second.SetDeadline(time.Now().Add(500 * time.Millisecond))
@@ -276,8 +259,6 @@ func TestTheConnectionLimitRefusesRatherThanQueues(t *testing.T) {
 	}
 }
 
-// A configuration that could not be served is refused before any listener is
-// opened, so a half-started service never survives.
 func TestAnInvalidConfigurationIsRefused(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -295,8 +276,7 @@ func TestAnInvalidConfigurationIsRefused(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			// Every case except the one about endpoints needs something to
-			// serve, or it would be refused for the wrong reason.
+
 			config := testConfig(t, func(c *Config) {
 				c.TCPPort = freePort(t)
 				if test.mutate != nil {
@@ -310,8 +290,6 @@ func TestAnInvalidConfigurationIsRefused(t *testing.T) {
 	}
 }
 
-// A laboratory that cannot read a status file has to be told, rather than
-// carrying on as though the service were ready.
 func TestAnUnreadableStatusIsAnError(t *testing.T) {
 	t.Parallel()
 	if _, err := ReadStatus(filepath.Join(t.TempDir(), "missing.json")); err == nil {

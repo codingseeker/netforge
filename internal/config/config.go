@@ -167,8 +167,6 @@ func validateScope(scope Scope, limits Limits) []error {
 	return nil
 }
 
-// validateFaults checks the declared faults. Every fault is reported, not just
-// the first, so a file with three mistakes says so.
 func validateFaults(faults []FaultSpec, scope Scope, limits Limits) []error {
 	const op = "config.validate"
 	if len(faults) > CeilingFaults {
@@ -181,12 +179,6 @@ func validateFaults(faults []FaultSpec, scope Scope, limits Limits) []error {
 		field := "faults[" + itoa(i) + "]"
 		problems = append(problems, fault.validate(scope, limits)...)
 
-		// One device carries at most one fault, because a queue discipline is
-		// a single root and a second one would merge into the first. The
-		// direction is part of the placement: an inbound fault sits on the far
-		// end of the link, so it never shares a device with an outbound one.
-		// Only the engine knows the topology, so it has the last word on
-		// where a fault lands; this catches the clashes a reader can see.
 		placement := fault.Target + "/" + fault.Interface + "/" + string(fault.Direction)
 		if first, clash := placements[placement]; clash {
 			problems = append(problems, apperr.Validation(op, field+

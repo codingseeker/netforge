@@ -24,7 +24,6 @@ const (
 	target     = "10.42.0.3"
 )
 
-// testDocument is a valid document with one declared fault.
 func testDocument(t *testing.T) config.Config {
 	t.Helper()
 	document := []byte(`
@@ -78,26 +77,24 @@ func compile(t *testing.T, document config.Config, observation Observation, requ
 	return Compile(document, observation, requests, recovery.DefaultCriteria(), DefaultLimits(), time.Now())
 }
 
-// fakeEnvironment records the lifecycle and returns what the test chooses.
 type fakeEnvironment struct {
 	mu    sync.Mutex
 	steps []State
-	// fail is the state that fails, if any.
+
 	fail State
-	// err is what the failing state returns.
+
 	err error
-	// outcomes is what the recover step reports.
+
 	outcomes []recovery.Outcome
-	// recoveries is the number of authorizations the recover step was given.
+
 	authorizations int
-	// tornDown counts the teardown calls, which must be exactly one.
+
 	tornDown int
-	// diagnosis is what the diagnose step returns.
+
 	diagnosis investigator.Report
-	// baseline is the measurement every phase returns unless broken is set.
+
 	broken bool
-	// noFaults makes the fault step inject nothing, for the plan that declares
-	// no faults.
+
 	noFaults bool
 }
 
@@ -194,10 +191,7 @@ func (f *fakeEnvironment) Recover(ctx context.Context, authorizations []recovery
 	f.mu.Lock()
 	f.authorizations = len(authorizations)
 	if len(authorizations) > 0 && f.outcomes == nil {
-		// A laboratory that was asked to repair something and managed it measures
-		// a healthy path afterwards. A fake that stayed broken after a repair
-		// would make the verification step untestable, because every run would
-		// fail at it for the same reason.
+
 		f.broken = false
 	}
 	f.mu.Unlock()
@@ -221,7 +215,6 @@ func (f *fakeEnvironment) Verify(ctx context.Context) ([]probe.Measurement, erro
 	return []probe.Measurement{f.measurement()}, nil
 }
 
-// failureState is the state a run stops in, or the empty string.
 func failureState(report Report) State { return report.Failed }
 
 func run(t *testing.T, plan Plan, env Environment) (Report, error) {
@@ -242,10 +235,7 @@ func TestAnExperimentWalksTheWholeLifecycle(t *testing.T) {
 	if !report.Succeeded() {
 		t.Fatalf("the experiment failed in %s: %v", report.Failed, report.Err)
 	}
-	// The report is the authority on which states ran. The report state does
-	// not call the environment at all, and a recover step with nothing
-	// authorized does not either, so the environment's own record is shorter
-	// than the lifecycle by design.
+
 	want := States()
 	if len(report.Steps) != len(want) {
 		t.Fatalf("the report holds %d steps, want %d", len(report.Steps), len(want))
@@ -271,21 +261,13 @@ func TestAnExperimentWalksTheWholeLifecycle(t *testing.T) {
 }
 
 func TestAFailedStepStillCleansUp(t *testing.T) {
-	// Every state has to have a cleanup path, so this is run once for each of
-	// them: an experiment that fails anywhere must still take its laboratory
-	// apart, and must say where it failed.
-	//
-	// The report state is left out because it cannot fail: it is the state where
-	// the report stops changing, so there is nothing in it to go wrong. A test
-	// that pretended otherwise would be asserting that a state which does no
-	// work reports an error, which is not a property worth having.
+
 	for _, state := range States() {
 		if state == StateCleanup || state == StateReport {
 			continue
 		}
 		t.Run(state.String(), func(t *testing.T) {
-			// The recover step is given something to do, so it is reached at
-			// all: with nothing authorized it is a step that does nothing.
+
 			env := &fakeEnvironment{fail: state}
 			_ = state
 			plan, err := compile(t, testDocument(t), testObservation(), []recovery.Request{{
@@ -307,8 +289,7 @@ func TestAFailedStepStillCleansUp(t *testing.T) {
 			if env.tornDown != 1 {
 				t.Errorf("the laboratory was torn down %d times after a failure in %s, want 1", env.tornDown, state)
 			}
-			// The states after the failure are not visited, and the report says
-			// so rather than listing states that did not happen.
+
 			for _, step := range report.Steps {
 				if step.State == state && !step.Failed() {
 					t.Errorf("the step for %s is not marked as failed", state)
@@ -332,8 +313,6 @@ func TestACleanupFailureIsReported(t *testing.T) {
 	}
 }
 
-// failingTeardown is a laboratory that runs the lifecycle and then cannot be
-// taken apart.
 type failingTeardown struct{ fakeEnvironment }
 
 func (f *failingTeardown) Teardown(ctx context.Context) error {
@@ -345,8 +324,7 @@ func TestOnlyOneStateTransitionIsLegal(t *testing.T) {
 	if err := Transition(StateSetup, StateBaseline); err != nil {
 		t.Errorf("setup to baseline is %v, want it allowed", err)
 	}
-	// Every illegal pair is refused, so a lifecycle cannot be walked out of
-	// order or backwards.
+
 	states := States()
 	for i, from := range states {
 		for j, to := range states {
@@ -387,10 +365,7 @@ func TestEveryStateCanBeCleanedUpFrom(t *testing.T) {
 }
 
 func TestTheWholeExperimentIsValidatedBeforeAnythingRuns(t *testing.T) {
-	// The document is valid and the fault is fine, but the recovery action is
-	// not authorized. Nothing may run, because the recover step is part of the
-	// same experiment and a laboratory built for an experiment that cannot
-	// finish is a laboratory to clean up by hand.
+
 	document := testDocument(t)
 	env := &fakeEnvironment{}
 	_, err := compile(t, document, testObservation(), []recovery.Request{{
@@ -441,8 +416,7 @@ func TestAnInvalidObservationIsRefusedBeforeTheLaboratoryExists(t *testing.T) {
 }
 
 func TestEveryProblemIsReportedAtOnce(t *testing.T) {
-	// A document with several mistakes says all of them, so its author is not
-	// made to fix them one run at a time.
+
 	document := testDocument(t)
 	document.Name = "Not A Name"
 	observation := testObservation()
@@ -463,9 +437,7 @@ func TestEveryProblemIsReportedAtOnce(t *testing.T) {
 func TestAnExperimentThatCannotFitInItsDurationIsRefused(t *testing.T) {
 	document := testDocument(t)
 	observation := testObservation()
-	// Three measurements of ten seconds each is more than the document's five
-	// minutes allows for anything else, and the limit is checked against the
-	// document rather than assumed.
+
 	document.Limits.MaxDuration = config.Duration(5 * time.Second)
 	_, err := compile(t, document, observation, nil)
 	if !apperr.Is(err, apperr.KindLimitExceeded) {
@@ -486,8 +458,7 @@ func TestTheControllerCeilingIsEnforced(t *testing.T) {
 	}
 	limits = DefaultLimits()
 	limits.MaxFaults = 1
-	// Two faults on two different namespaces, so the refusal is about the count
-	// rather than about two faults landing on one device.
+
 	twoFaults, err := config.Parse([]byte(`
 name: two-faults
 scope:
@@ -535,16 +506,11 @@ func TestTheSeedIsCarriedThroughToTheReport(t *testing.T) {
 }
 
 func TestAnExperimentWithNoRecoveryVisitsTheStepAndDoesNothing(t *testing.T) {
-	// The lifecycle always visits recover. With nothing authorized, the step
-	// reports that it did nothing, which is the visible consequence of the rule
-	// that a diagnosis is not a permission.
+
 	plan := testPlan(t)
 	env := &fakeEnvironment{broken: true}
 	report, err := run(t, plan, env)
-	// Nothing was authorized, so nothing was repaired, and the verification
-	// measures that rather than assuming it. Failing at the verify state is the
-	// correct outcome: a run that reported success here would be reporting a
-	// healthy path it had just measured to be broken.
+
 	if err == nil {
 		t.Fatal("a run with nothing authorized reported success on a broken path")
 	}
@@ -561,8 +527,7 @@ func TestAnExperimentWithNoRecoveryVisitsTheStepAndDoesNothing(t *testing.T) {
 	if env.authorizations != 0 {
 		t.Errorf("the recover step was given %d authorizations, want 0", env.authorizations)
 	}
-	// The diagnosis suggested a repair, and the suggestion is in the report as
-	// a suggestion.
+
 	if report.Recommendation.Action != recovery.ActionRemoveFault {
 		t.Errorf("the recommendation is %q, want a suggestion to remove the fault", report.Recommendation.Action)
 	}
@@ -617,8 +582,7 @@ func AnAuthorizedActionThatDidNotRecoverFailsTheExperiment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
-	// The action ran and the measurement says the path is still impaired. The
-	// experiment has to fail rather than report a recovery that did not happen.
+
 	env := &fakeEnvironment{broken: true, outcomes: []recovery.Outcome{{
 		Authorization: plan.Recoveries[0],
 		Verification:  recovery.Verification{Passed: false, Reason: "loss is 80%"},
@@ -645,9 +609,7 @@ func TestARecoveryThatPerformedSomethingElseFailsTheExperiment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile: %v", err)
 	}
-	// The environment performed an action that was never authorized. The
-	// controller checks, because a report that says the wrong thing was
-	// recovered is worse than a failed run.
+
 	env := &fakeEnvironment{outcomes: []recovery.Outcome{{
 		Authorization: plan.Recoveries[0],
 		Verification:  recovery.Verification{Passed: true},
@@ -678,8 +640,7 @@ func TestAPlanIsFollowedInOrder(t *testing.T) {
 	if !strings.Contains(Render(plan.Steps), "setup") {
 		t.Error("the rendered plan does not name the states")
 	}
-	// A plan is a value, so a controller refuses one that is not the lifecycle
-	// rather than walking it.
+
 	broken := plan
 	broken.Steps = append([]Step(nil), plan.Steps...)
 	broken.Steps[1] = Step{State: StateReport}
@@ -713,8 +674,7 @@ func TestTheControllerReportsWhereItIs(t *testing.T) {
 	if controller.Plan().ExperimentID != plan.ExperimentID {
 		t.Error("the controller reports a different plan from the one it was given")
 	}
-	// Running it walks to cleanup, so a reader of the controller sees where the
-	// experiment ended rather than where it began.
+
 	if _, err := controller.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -724,9 +684,7 @@ func TestTheControllerReportsWhereItIs(t *testing.T) {
 }
 
 func TestACancelledExperimentStillCleansUp(t *testing.T) {
-	// A cancelled context is the most likely way an experiment is interrupted,
-	// and it is exactly the case where a laboratory would be left behind if the
-	// teardown shared the cancelled context.
+
 	ctx, cancel := context.WithCancel(context.Background())
 	env := &fakeEnvironment{}
 	controller, err := New(testPlan(t), env, time.Now())

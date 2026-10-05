@@ -72,10 +72,7 @@ type Session struct {
 
 type Command struct {
 	Name string
-	// Parent is the command this one is a subcommand of, and is empty for a
-	// command the user names directly. Help has to print the path that was
-	// typed rather than the leaf name, or `help experiment run` answers for a
-	// command called `run`, which does not exist.
+
 	Parent  string
 	Summary string
 	Usage   string

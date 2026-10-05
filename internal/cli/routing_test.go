@@ -8,27 +8,15 @@ import (
 	"testing"
 )
 
-// The routing and service flags are what reach a capability the laboratory
-// already had. Every refusal below happens while the command is still deciding
-// what to build: a refused run has created no namespace, opened no listener and
-// started no process, which is the property that makes these tests runnable
-// without a kernel at all.
-
-// Phase 14's laboratory is one client and one server, and the identifier it uses
-// decides the namespaces, so a test can name them without a kernel.
 const (
 	phase14ID     = "nfp14"
 	phase14Client = "nf-client0-" + phase14ID
 	phase14Server = "nf-server0-" + phase14ID
 	phase14Router = "nf-router-" + phase14ID
-	// phase14ServerAddr is the address the plan of a one-client, one-server
-	// laboratory gives its server: the block starts at 10.42.0.4, the router
-	// takes .5 and the node takes .6.
+
 	phase14ServerAddr = "10.42.0.6"
 )
 
-// phase14Document writes the document to a file, because that is what the command
-// takes: a path, or - for standard input.
 func phase14Document(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "phase14.yaml")
@@ -65,9 +53,7 @@ func phase14Run(t *testing.T, flags ...string) runResult {
 }
 
 func TestRoutingRefusesAModeTheRouterDoesNotImplement(t *testing.T) {
-	// The refusal is a refusal, not a default. A silently ignored
-	// --routing software would report a software router that never ran, which is
-	// the same class of defect as a report claiming a checksum never recomputed.
+
 	result := phase14Run(t, "--protocol", "icmp", "--routing", "ebpf")
 	if result.err == nil {
 		t.Fatal("an unimplemented routing mode was accepted")
@@ -100,9 +86,7 @@ func TestRoutingAcceptsBothImplementedModes(t *testing.T) {
 			}
 		})
 	}
-	// An empty routing flag is the mode every laboratory used before the
-	// software router existed, and it has to keep meaning the kernel rather than
-	// becoming a refusal.
+
 	opts := &experimentOptions{routing: "  "}
 	if got, err := opts.routingMode(); err != nil || got.String() != "kernel" {
 		t.Errorf("an unset -routing is %q/%v, want kernel and no error", got.String(), err)
@@ -110,9 +94,7 @@ func TestRoutingAcceptsBothImplementedModes(t *testing.T) {
 }
 
 func TestAProtocolThatNeedsAListenerIsRefusedAgainstNothing(t *testing.T) {
-	// This is the defect the phase exists to close: before it, a --protocol tcp
-	// run from the command line was answered by nothing, and the report described
-	// a closed port as a measurement.
+
 	for _, protocol := range []string{"tcp", "udp", "tls", "http"} {
 		t.Run(protocol, func(t *testing.T) {
 			result := phase14Run(t, "--protocol", protocol, "--port", "7000")
@@ -130,9 +112,7 @@ func TestAProtocolThatNeedsAListenerIsRefusedAgainstNothing(t *testing.T) {
 }
 
 func TestICMPIsNotAskedToServe(t *testing.T) {
-	// An echo request is answered by the network itself. A listener asked for
-	// here would bind a port nothing measures, and a report that listed it would
-	// be describing an endpoint the run never used.
+
 	result := phase14Run(t, "--protocol", "icmp", "--service-ports", "1", "--port", "7000")
 	if result.err == nil {
 		t.Fatal("a listener was accepted for a protocol that needs none")
@@ -155,9 +135,7 @@ func TestServicePortsAreBoundedByTheServersThatExist(t *testing.T) {
 }
 
 func TestThePortsAServiceBindsAreChosenByTheCallerAndBounded(t *testing.T) {
-	// The count and the base port are separate flags so that the arithmetic is
-	// the caller's: the i-th serving namespace binds base+i, and a port outside
-	// the range is refused rather than clamped.
+
 	opts := &experimentOptions{
 		protocol:        "tcp",
 		port:            7100,
@@ -176,8 +154,6 @@ func TestThePortsAServiceBindsAreChosenByTheCallerAndBounded(t *testing.T) {
 		t.Errorf("serviceRange() base = %d, want the observation's port 7100", base)
 	}
 
-	// A base port of zero is not a port. It is a refusal, because a service that
-	// bound port 0 would answer on an ephemeral port nothing knows to ask.
 	zero := &experimentOptions{protocol: "tcp", port: 0, servers: 1, servicePorts: 1}
 	if _, _, err := zero.serviceRange(); err == nil {
 		t.Error("a service with no port to bind was accepted")
@@ -204,8 +180,7 @@ func TestServicePortsPastTheLastPortAreRefused(t *testing.T) {
 }
 
 func TestABasePortWithoutAServingNamespaceIsRefused(t *testing.T) {
-	// A base port with nothing to serve it is a flag that says nothing, and
-	// accepting it would leave an operator believing a port was reserved.
+
 	opts := &experimentOptions{protocol: "icmp", port: 0, serviceBasePort: 7000}
 	_, _, err := opts.serviceRange()
 	if err == nil {
@@ -217,8 +192,6 @@ func TestABasePortWithoutAServingNamespaceIsRefused(t *testing.T) {
 	}
 }
 
-// phase14Options builds the options a run of the phase 14 document would carry,
-// so a test can reach the arithmetic without the command line.
 func phase14Options(target string) *experimentOptions {
 	return &experimentOptions{
 		id:              phase14ID,
@@ -233,9 +206,7 @@ func phase14Options(target string) *experimentOptions {
 }
 
 func TestAnObservationOutsideTheServedAddressesIsRefused(t *testing.T) {
-	// Serving one server and measuring another is the case a count-and-base-port
-	// pair makes possible, and it is refused before anything is built: the run
-	// would succeed and mean nothing.
+
 	opts := phase14Options("10.42.0.99")
 	if _, err := opts.serviceSpecs("10.42.0.0/24"); err == nil {
 		t.Fatal("an observation of an address nothing serves was accepted")
@@ -245,8 +216,7 @@ func TestAnObservationOutsideTheServedAddressesIsRefused(t *testing.T) {
 }
 
 func TestAServedAddressIsAccepted(t *testing.T) {
-	// The server of a one-client, one-server plan on this network holds
-	// 10.42.0.7, so a run that serves it and measures it is coherent.
+
 	opts := phase14Options(phase14ServerAddr)
 	specs, err := opts.serviceSpecs("10.42.0.0/24")
 	if err != nil {
@@ -261,9 +231,7 @@ func TestAServedAddressIsAccepted(t *testing.T) {
 }
 
 func TestTwoRunsOnOneHostDoNotCollide(t *testing.T) {
-	// The requirement the base port exists for. Two laboratories may be built at
-	// the same time on one host as long as their ports differ, and because the
-	// namespaces are separate a port is only ever bound inside one of them.
+
 	first := phase14Options(phase14ServerAddr)
 	second := phase14Options(phase14ServerAddr)
 	second.port, second.serviceBasePort = 7100, 7100
@@ -281,8 +249,7 @@ func TestTwoRunsOnOneHostDoNotCollide(t *testing.T) {
 }
 
 func TestThePortsOfEachServingNamespaceFollowTheBase(t *testing.T) {
-	// Three servers are planned, so the third serving namespace is the one whose
-	// address the observation names.
+
 	opts := phase14Options(phase14ServerAddr)
 	opts.servers, opts.servicePorts, opts.serviceBasePort = 3, 3, 7000
 	specs, err := opts.serviceSpecs("10.42.0.0/24")

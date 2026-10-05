@@ -48,11 +48,7 @@ func TestMain(m *testing.M) {
 	}
 	repoRootPath = root
 	binaryPath = filepath.Join(root, "bin", "netforge")
-	// The transport comparison runs this same test binary inside a laboratory
-	// namespace as the client half of its measurement. That process has no use
-	// for the command line binary, and a namespace command runs without the
-	// module cache the build needs, so the build is skipped rather than being
-	// allowed to fail a child that was only asked to measure a transport.
+
 	if !benchmarkChild() {
 		if err := buildBinary(root); err != nil {
 			fmt.Fprintf(os.Stderr, "integration: %v\n", err)
@@ -62,9 +58,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// benchmarkChild reports whether this process is the client half of the
-// transport comparison. The parent starts it with the child test selected, so
-// the selected test is what tells the two apart.
 func benchmarkChild() bool {
 	const child = "-test.run=^TestTransportBenchmarkChild$"
 	for _, arg := range os.Args[1:] {

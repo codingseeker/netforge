@@ -40,24 +40,24 @@ intact. Loss is the share of the offered payload that never came back.
 
 | Condition | Transport | Throughput | Goodput | Loss | Mean RTT | Retransmits | Complete |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | :---: |
-| 0% loss | rudp | 17551152 B/s | 17551152 B/s | 0.0% | 1.83 ms | 0 | true |
-| 0% loss | tcp | 35807130 B/s | 35807130 B/s | 0.0% | 0.14 ms | 0 | true |
-| 0% loss | udp | 651678 B/s | 488759 B/s | 25.0% | 0.39 ms | 0 | false |
-| 1% loss | rudp | 2232381 B/s | 2232381 B/s | 0.0% | 15.22 ms | 22 | true |
-| 1% loss | tcp | 54968337 B/s | 54968337 B/s | 0.0% | 0.51 ms | 0 | true |
-| 1% loss | udp | 647176 B/s | 642120 B/s | 0.8% | 0.08 ms | 0 | false |
-| 5% loss | rudp | 1194430 B/s | 1194430 B/s | 0.0% | 23.52 ms | 33 | true |
-| 5% loss | tcp | 1219649 B/s | 1219649 B/s | 0.0% | 1.82 ms | 0 | true |
-| 5% loss | udp | 644391 B/s | 616702 B/s | 4.3% | 0.08 ms | 0 | false |
-| 10% loss | rudp | 95828 B/s | 95828 B/s | 0.0% | 69.05 ms | 146 | true |
-| 10% loss | tcp | 208764 B/s | 208764 B/s | 0.0% | 470.21 ms | 0 | true |
-| 10% loss | udp | 646243 B/s | 585658 B/s | 9.4% | 0.05 ms | 0 | false |
-| high latency | rudp | 431881 B/s | 431881 B/s | 0.0% | 63.04 ms | 0 | true |
-| high latency | tcp | 864215 B/s | 864215 B/s | 0.0% | 176.65 ms | 0 | true |
-| high latency | udp | 501080 B/s | 180076 B/s | 64.1% | 120.69 ms | 0 | false |
-| high jitter | rudp | 435749 B/s | 435749 B/s | 0.0% | 63.04 ms | 0 | true |
-| high jitter | tcp | 143525 B/s | 143525 B/s | 0.0% | 523.09 ms | 0 | true |
-| high jitter | udp | 502647 B/s | 180639 B/s | 64.1% | 88.02 ms | 0 | false |
+| 0% loss | rudp | 15356101 B/s | 15356101 B/s | 0.0% | 1.94 ms | 0 | true |
+| 0% loss | tcp | 38584634 B/s | 38584634 B/s | 0.0% | 0.08 ms | 0 | true |
+| 0% loss | udp | 643494 B/s | 590707 B/s | 8.2% | 1.17 ms | 0 | false |
+| 1% loss | rudp | 806937 B/s | 806937 B/s | 0.0% | 29.85 ms | 67 | true |
+| 1% loss | tcp | 33305044 B/s | 33305044 B/s | 0.0% | 0.26 ms | 0 | true |
+| 1% loss | udp | 643153 B/s | 640641 B/s | 0.4% | 0.10 ms | 0 | false |
+| 5% loss | rudp | 196965 B/s | 196965 B/s | 0.0% | 39.57 ms | 86 | true |
+| 5% loss | tcp | 26159465 B/s | 26159465 B/s | 0.0% | 1.23 ms | 0 | true |
+| 5% loss | udp | 646218 B/s | 618450 B/s | 4.3% | 0.07 ms | 0 | false |
+| 10% loss | rudp | 212404 B/s | 212404 B/s | 0.0% | 48.12 ms | 106 | true |
+| 10% loss | tcp | 607640 B/s | 607640 B/s | 0.0% | 205.70 ms | 0 | true |
+| 10% loss | udp | 654235 B/s | 0 B/s | 100.0% | 0.00 ms | 0 | false |
+| high latency | rudp | 425282 B/s | 425282 B/s | 0.0% | 63.98 ms | 0 | true |
+| high latency | tcp | 866658 B/s | 866658 B/s | 0.0% | 154.85 ms | 0 | true |
+| high latency | udp | 500462 B/s | 179854 B/s | 64.1% | 119.84 ms | 0 | false |
+| high jitter | rudp | 423566 B/s | 423566 B/s | 0.0% | 63.26 ms | 0 | true |
+| high jitter | tcp | 378543 B/s | 378543 B/s | 0.0% | 240.28 ms | 0 | true |
+| high jitter | udp | 494105 B/s | 177569 B/s | 64.1% | 98.83 ms | 0 | false |
 
 ## What each scenario is for
 

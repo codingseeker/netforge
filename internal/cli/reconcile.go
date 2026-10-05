@@ -13,15 +13,6 @@ import (
 	"github.com/netforge/netforge/internal/reconcile"
 )
 
-// The reconcile commands are the only ones here that delete anything. Listing is
-// safe: it reads a directory and prints what it can positively identify, and it
-// identifies nothing it cannot prove. Reclaiming is not, which is why it needs
-// the same three things a recovery needs — a name, an explicit authorization and
-// a written reason — and why it will not act on a directory whose owning process
-// is still running.
-
-// reconcileOptions is what the reclaim subcommand takes. The names are names and
-// not paths, so a request cannot carry a way out of the state root.
 type reconcileOptions struct {
 	stateRoot string
 	names     stringList
@@ -57,10 +48,6 @@ func reconcileCommand() *Command {
 	}
 }
 
-// stateRootFlags registers the flags both subcommands take. The state root is a
-// flag rather than a fixed path so a host whose temporary directory is shared
-// with software NetForge does not control can be reconciled in isolation, and so
-// a test can reconcile a directory of its own.
 func stateRootFlags(fs *flag.FlagSet, opts *reconcileOptions) {
 	fs.StringVar(&opts.stateRoot, "state-root", "",
 		"the directory NetForge keeps its state in; default "+reconcile.StateRootEnv+" or the system temporary directory")
@@ -98,12 +85,6 @@ func reconcileList() *Command {
 	}
 }
 
-// writeListing prints the state root, its entries, and what was and was not
-// identified.
-//
-// The unidentified are listed rather than hidden, and with no identifier: a
-// reader has to be able to see that something is there, and this listing is not
-// allowed to be the thing that claims it.
 func writeListing(out io.Writer, root string, entries []reconcile.Entry) error {
 	if _, err := fmt.Fprintf(out, "state root: %s\n", root); err != nil {
 		return apperr.IO("cli.reconcile.list", "the listing could not be written", err)
@@ -136,9 +117,7 @@ func writeListing(out io.Writer, root string, entries []reconcile.Entry) error {
 		return apperr.IO("cli.reconcile.list", "the listing could not be written", err)
 	}
 	if foreign > 0 {
-		// The state root is shared, so an unidentified entry is normal rather
-		// than alarming, and the listing says what it did about them instead of
-		// leaving it to be inferred from the word "unidentified".
+
 		if _, err := fmt.Fprintln(out,
 			"the rest belong to something else and are never candidates for removal: this state root is shared"); err != nil {
 			return apperr.IO("cli.reconcile.list", "the listing could not be written", err)
@@ -182,9 +161,7 @@ func reconcileReclaim() *Command {
 			if err != nil {
 				return err
 			}
-			// The authorization is built before anything is read from disk, so a
-			// reclaim that is not permitted costs no filesystem call and cannot
-			// half-happen.
+
 			authorization, err := reconcile.Authorize(root, reconcile.Request{
 				Names:   opts.names,
 				Reason:  opts.reason,
@@ -210,9 +187,7 @@ func reconcileReclaim() *Command {
 				"refused", report.Refused,
 				"reason", report.Reason)
 			if report.Refused > 0 {
-				// A reclaim that refused something has not done what it was asked
-				// to do, and saying so is better than a report a script reads as
-				// success.
+
 				return apperr.Conflict("cli.reconcile.reclaim",
 					"nothing was reclaimed for "+plural(report.Refused, "name", "names")+
 						" that was refused; nothing was removed that is still in use or is not NetForge's", nil)
@@ -222,10 +197,6 @@ func reconcileReclaim() *Command {
 	}
 }
 
-// ageGate refuses a directory younger than the operator's threshold. It is a
-// separate check because an operator who says "older than an hour" is expressing
-// a fear about a run that is still starting, and that fear is worth honouring
-// even though the marker already refuses a live owner.
 func ageGate(root string, names []string, older time.Duration, now time.Time) error {
 	const op = "cli.reconcile.reclaim"
 	entries, err := reconcile.Scan(root, now)
@@ -239,8 +210,7 @@ func ageGate(root string, names []string, older time.Duration, now time.Time) er
 	for _, name := range names {
 		entry, found := byName[strings.TrimSpace(name)]
 		if !found {
-			// It is not there, which is the same answer as having been removed
-			// already, and the reclaim says so rather than failing here.
+
 			continue
 		}
 		if entry.Age < older {
@@ -271,10 +241,6 @@ func writeReclaim(out io.Writer, report reconcile.Report) error {
 	return nil
 }
 
-// resolveRoot decides which state root to act on. The environment variable is
-// read here rather than inside the package so that a command line flag always
-// wins over the environment, and so the value a run acted on is the value its
-// output names.
 func resolveRoot(flagValue string) (string, error) {
 	const op = "cli.reconcile"
 	root := strings.TrimSpace(flagValue)
@@ -295,8 +261,6 @@ func plural(count int, one, many string) string {
 	return strconv.Itoa(count) + " " + many
 }
 
-// header renders a listing column heading at the width its entries use, so the
-// heading and the values below it line up without either being hard-coded twice.
 func header(name string, width int) string {
 	if len(name) >= width {
 		return name + " "

@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// mustBalancer builds a balancer that is closed with the test, for the tests that
-// are about which backend a key is given to rather than about traffic reaching
-// one.
 func mustBalancer(t *testing.T, config Config) *Balancer {
 	t.Helper()
 	balancer, err := New(config)
@@ -20,9 +17,6 @@ func mustBalancer(t *testing.T, config Config) *Balancer {
 	return balancer
 }
 
-// The round robin walks the backends in the order they were registered, so a
-// laboratory reading a report knows which backend the first client went to
-// without counting anything.
 func TestTheRoundRobinWalksTheBackendsInOrder(t *testing.T) {
 	t.Parallel()
 	balancer := mustBalancer(t, testConfig(PolicyRoundRobin, "10.0.0.1:1", "10.0.0.2:2", "10.0.0.3:3"))
@@ -40,19 +34,12 @@ func TestTheRoundRobinWalksTheBackendsInOrder(t *testing.T) {
 	}
 }
 
-// The least connections policy is what the name says: it takes a backend with
-// fewer connections rather than the next one in turn. The two policies are given
-// the same uneven load and asked for one client, so what differs between them is
-// the policy and not the sequence.
 func TestTheLeastConnectionsPolicyTakesTheBackendWithFewestConnections(t *testing.T) {
 	t.Parallel()
 	addresses := []string{"10.0.0.1:1", "10.0.0.2:2", "10.0.0.3:3"}
 	roundRobin := mustBalancer(t, testConfig(PolicyRoundRobin, addresses...))
 	least := mustBalancer(t, testConfig(PolicyLeastConnections, addresses...))
 
-	// One backend is given a load the other two do not have. A backend holding
-	// five connections is set up directly, because which backend a client is
-	// given is the balancer's own decision to make.
 	holdConnection(roundRobin, 0, 5)
 	holdConnection(least, 0, 5)
 
@@ -71,9 +58,6 @@ func TestTheLeastConnectionsPolicyTakesTheBackendWithFewestConnections(t *testin
 	}
 }
 
-// Least connections gives the backend with the fewest open connections, and no
-// policy may exceed a per-backend limit to avoid a load: the limit decides which
-// backends are candidates, and a full one is not among them.
 func TestTheLeastConnectionsPolicyRespectsThePerBackendLimit(t *testing.T) {
 	t.Parallel()
 	addresses := []string{"10.0.0.1:1", "10.0.0.2:2", "10.0.0.3:3"}
@@ -81,9 +65,6 @@ func TestTheLeastConnectionsPolicyRespectsThePerBackendLimit(t *testing.T) {
 	config.Limits.MaxBackendConnections = 2
 	balancer := mustBalancer(t, config)
 
-	// Six clients over three backends with two slots each: every client is
-	// placed, no backend goes over its limit, and the balancer is the one that
-	// refused to stack the load rather than the limit.
 	counts := make(map[string]int, len(addresses))
 	for range 6 {
 		chosen := balancer.reserve("key")
@@ -102,10 +83,6 @@ func TestTheLeastConnectionsPolicyRespectsThePerBackendLimit(t *testing.T) {
 	}
 }
 
-// A key goes to the same backend every time, and the keys go to every backend. Both
-// halves matter: a hash that always returns one backend is a balancer with one
-// backend, and a hash that returns a different one each time is a balancer that
-// moves every session on every connection.
 func TestTheConsistentHashPolicyIsStableAndSpread(t *testing.T) {
 	t.Parallel()
 	addresses := []string{"10.0.0.1:1", "10.0.0.2:2", "10.0.0.3:3"}
@@ -135,15 +112,12 @@ func TestTheConsistentHashPolicyIsStableAndSpread(t *testing.T) {
 			t.Errorf("backend %s was given no key out of %d, want the keys spread over the backends",
 				address, keys)
 		}
-		// Three backends over 600 keys is 200 each, and a ring built from 64
-		// points per backend is well inside a few percent of that.
+
 		if counts[address] < 120 || counts[address] > 280 {
 			t.Errorf("backend %s was given %d of %d keys, want roughly a third", address, counts[address], keys)
 		}
 	}
-	// A second balancer built from the same document maps the same keys the same
-	// way, because the ring comes from the addresses and not from the order this
-	// process happened to register them in.
+
 	other := mustBalancer(t, testConfig(PolicyConsistentHash, addresses...))
 	for key, address := range chosen {
 		second := other.reserve(key)
@@ -158,9 +132,6 @@ func TestTheConsistentHashPolicyIsStableAndSpread(t *testing.T) {
 	}
 }
 
-// A key keeps its backend while that backend is serving, so the sessions a
-// laboratory started keep landing where they started, and a backend taken out of
-// service moves only the keys that were on it.
 func TestTakingABackendOutOfServiceMovesOnlyItsKeys(t *testing.T) {
 	t.Parallel()
 	addresses := []string{"10.0.0.1:1", "10.0.0.2:2", "10.0.0.3:3"}
@@ -185,7 +156,6 @@ func TestTakingABackendOutOfServiceMovesOnlyItsKeys(t *testing.T) {
 		t.Fatalf("no key of %d landed on %s, want the second backend to carry some of them", keys, addresses[1])
 	}
 
-	// The second backend stops answering and is taken out of service.
 	balancer.mu.Lock()
 	balancer.backends[1].healthy = false
 	balancer.mu.Unlock()
@@ -218,9 +188,6 @@ func TestTakingABackendOutOfServiceMovesOnlyItsKeys(t *testing.T) {
 	}
 }
 
-// A balancer that cannot place a client says so rather than choosing a backend it
-// has already decided against, because a client that is placed and then has its
-// payload dropped is worse off than one that is turned away.
 func TestNoBackendAvailableIsReportedAsSuch(t *testing.T) {
 	t.Parallel()
 	balancer := mustBalancer(t, testConfig(PolicyRoundRobin, "10.0.0.1:1", "10.0.0.2:2"))
@@ -232,16 +199,12 @@ func TestNoBackendAvailableIsReportedAsSuch(t *testing.T) {
 	if chosen := balancer.reserve("key"); chosen != nil {
 		t.Fatalf("reserve() = %s, want nothing while every backend is out of service", chosen.address)
 	}
-	// The error a client is given is the balancer's own, so a caller can tell a
-	// balancer with nowhere to put a connection from a balancer that failed.
+
 	if _, _, err := balancer.place("key"); !errors.Is(err, ErrNoBackend) {
 		t.Errorf("place() = %v, want %v", err, ErrNoBackend)
 	}
 }
 
-// A policy this build does not implement is refused at the configuration rather
-// than at the first client, and an empty policy is the round robin rather than an
-// error, because a document that did not choose has not chosen wrong.
 func TestAPolicyIsCheckedBeforeAnythingIsServed(t *testing.T) {
 	t.Parallel()
 	if _, err := New(testConfig("policy_from_the_future", "10.0.0.1:1")); err == nil {
@@ -261,8 +224,7 @@ func TestAPolicyIsCheckedBeforeAnythingIsServed(t *testing.T) {
 		if err != nil || parsed != policy {
 			t.Errorf("ParsePolicy(%q) = %s, %v, want %s, nil", policy, parsed, err, policy)
 		}
-		// The name a document uses and the name a report shows are the same, or a
-		// laboratory cannot tell which document it is looking at.
+
 		if formatted := fmt.Sprint(policy); formatted != policy.String() {
 			t.Errorf("%%v of %s = %q, want %q", policy, formatted, policy.String())
 		}
@@ -275,9 +237,6 @@ func TestAPolicyIsCheckedBeforeAnythingIsServed(t *testing.T) {
 	}
 }
 
-// The hash the ring is built on is the one this project documents, so a key that
-// is moved between two balancers, or between two runs, lands where the report says
-// it should rather than wherever a seed decided.
 func TestTheHashIsTheDocumentedOne(t *testing.T) {
 	t.Parallel()
 	for _, pair := range []struct {
@@ -295,9 +254,6 @@ func TestTheHashIsTheDocumentedOne(t *testing.T) {
 	}
 }
 
-// The ring holds a bounded number of points, built once per set of candidates and
-// reused, and every point belongs to a backend this balancer holds, so a lookup
-// can never return an address that was never registered.
 func TestTheRingIsBoundedAndCoversTheRegisteredBackends(t *testing.T) {
 	t.Parallel()
 	balancer := mustBalancer(t, testConfig(PolicyConsistentHash, "10.0.0.1:1", "10.0.0.2:2"))
@@ -324,14 +280,13 @@ func TestTheRingIsBoundedAndCoversTheRegisteredBackends(t *testing.T) {
 	if len(covered) != 2 {
 		t.Errorf("the ring covers %d backends, want the 2 that were registered", len(covered))
 	}
-	// The ring is ordered, because a lookup searches it rather than walking it.
+
 	for index := 1; index < len(ring); index++ {
 		if ring[index].hash < ring[index-1].hash {
 			t.Fatalf("the ring is out of order at %d, want the points sorted by hash", index)
 		}
 	}
-	// A second lookup does not rebuild it, so a transfer re-reserving its session
-	// per payload does not sort a ring per datagram.
+
 	before := balancer.ringFor
 	balancer.reserve("another key")
 	if len(balancer.ringFor) != len(before) {
@@ -339,13 +294,10 @@ func TestTheRingIsBoundedAndCoversTheRegisteredBackends(t *testing.T) {
 	}
 }
 
-// A key that lands past the last point on the ring wraps to the start of it, or a
-// client whose key hashes high enough would be given no backend at all.
 func TestAKeyPastTheEndOfTheRingWrapsOntoIt(t *testing.T) {
 	t.Parallel()
 	balancer := mustBalancer(t, testConfig(PolicyConsistentHash, "10.0.0.1:1", "10.0.0.2:2"))
-	// The ring is built on the first lookup rather than at registration, so a key
-	// is placed before its last point is read.
+
 	balancer.reserve("key")
 	ring := balancer.ring
 	last := ring[len(ring)-1].hash

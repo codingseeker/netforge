@@ -164,18 +164,6 @@ func TestSoftwareRouterReportsNoRoute(t *testing.T) {
 	}
 }
 
-// The router forwards frames it reads from a packet socket, which show the
-// bytes as they are on the wire rather than as the sending stack meant them.
-// A sender that offloads its transport sum leaves only the seed of the checksum
-// in those bytes, so a router that forwards them unchanged hands the far end a
-// packet it rejects as corrupt: a connection that is refused and never answered,
-// which on the wire is indistinguishable from a path that is down.
-//
-// Every protocol the prober speaks is checked here against a real service
-// behind the software router, because the seed is only left unfinished by the
-// stacks that offload: ICMP computes its own sum, so an echo request crosses
-// fine while a handshake does not. A test that only pinged would have passed
-// while TCP was broken.
 func TestSoftwareRouterForwardsEveryProtocolTheProberSpeaks(t *testing.T) {
 	plan, err := network.BuildPlan("softproto", "10.44.0.0/24", 1, 1, 1500)
 	if err != nil {
@@ -216,10 +204,7 @@ func TestSoftwareRouterForwardsEveryProtocolTheProberSpeaks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Space(%s): %v", client, err)
 	}
-	// The router resolves a destination by asking for it, which drops the first
-	// packet of every new flow. Echoing once warms the resolution so the
-	// protocols below are measured against a router that already knows where
-	// the server is, rather than against the cost of learning.
+
 	if _, _, err := clientSpace.Exec("ping", "-n", "-c", "1", "-W", "2", "-w", "4", server); err != nil {
 		t.Fatalf("warm the router: %v", err)
 	}
@@ -257,8 +242,6 @@ func TestSoftwareRouterForwardsEveryProtocolTheProberSpeaks(t *testing.T) {
 		})
 	}
 
-	// The router's own record has to agree: a probe that succeeded without the
-	// router carrying it would mean the probe never crossed the router at all.
 	stats, err := lab.RouterStats()
 	if err != nil {
 		t.Fatalf("RouterStats: %v", err)
@@ -271,12 +254,6 @@ func TestSoftwareRouterForwardsEveryProtocolTheProberSpeaks(t *testing.T) {
 		t.Error("the router forwarded nothing, so the probes did not cross it")
 	}
 
-	// A packet larger than the link it would leave by cannot be forwarded, and
-	// the router has to say so rather than drop it quietly. Two boundaries meet
-	// here: the sender may hand over a packet its own stack never segmented,
-	// and the link still has a size. The answer has to name the size, so this
-	// checks that the router answered rather than merely failed, and that it
-	// was still forwarding afterwards.
 	if stats.Oversize > 0 {
 		if stats.Unreachable == 0 {
 			t.Errorf("the router refused %d oversized packets without telling the sender", stats.Oversize)
@@ -289,8 +266,7 @@ func TestSoftwareRouterForwardsEveryProtocolTheProberSpeaks(t *testing.T) {
 		t.Errorf("the router failed to send %d times for a reason other than an oversized packet: %s",
 			stats.SendErrors, stats.LastError)
 	}
-	// Whatever the router refused, it kept working: one more probe after the
-	// refusals has to answer, so a refusal cannot have become an outage.
+
 	again, err := lab.Probe(context.Background(), probe.Request{
 		Protocol:   probe.ProtocolHTTP,
 		Namespace:  client,

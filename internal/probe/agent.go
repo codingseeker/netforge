@@ -19,19 +19,14 @@ import (
 	"github.com/netforge/netforge/internal/packet"
 )
 
-// AgentPayload is what the engine sends to the probe agent. The bounds travel
-// with the request so the agent enforces them itself, at the point where it
-// reads from a socket, rather than trusting a caller to have checked.
 type AgentPayload struct {
 	Request
-	// MaxResponseSize is the largest answer the agent may read.
+
 	MaxResponseSize int `json:"max_response_size"`
-	// MaxPayload is the largest payload the agent may send.
+
 	MaxPayload int `json:"max_payload"`
 }
 
-// Dispatch runs the probe agent. It is called from main; when the mode does not
-// match it reports that it did not handle the invocation.
 func Dispatch(args []string) (bool, int) {
 	if len(args) == 0 || args[0] != probeMode {
 		return false, 0
@@ -52,8 +47,7 @@ func Dispatch(args []string) (bool, int) {
 		payload.MaxPayload = 1400
 	}
 	result := Probe(context.Background(), payload)
-	// The result goes to stdout as JSON whatever happened: a failure is a
-	// measurement, and the engine has to be able to read it.
+
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, probeMode+": "+err.Error())
@@ -66,9 +60,6 @@ func Dispatch(args []string) (bool, int) {
 	return true, 0
 }
 
-// Probe performs one probe and reports what happened. It never returns an
-// error: a probe that could not get its answer returns a result that says so,
-// because the failure is the measurement an investigator needs.
 func Probe(ctx context.Context, payload AgentPayload) Result {
 	started := time.Now()
 	result := Result{
@@ -114,13 +105,11 @@ func Probe(ctx context.Context, payload AgentPayload) Result {
 		}
 		return result
 	}
-	// A probe that got its answer succeeded. Setting it here rather than in
-	// each case means no probe can return without saying so.
+
 	result.OK = true
 	return result
 }
 
-// address is the target as a dial string.
 func address(request Request) string {
 	if request.Port == 0 {
 		return request.Target
@@ -128,8 +117,6 @@ func address(request Request) string {
 	return net.JoinHostPort(request.Target, strconv.Itoa(int(request.Port)))
 }
 
-// probeTCP opens a connection, measures the handshake, and optionally carries
-// a payload round trip so the measurement is not only of the handshake.
 func probeTCP(ctx context.Context, request Request, payload AgentPayload, result *Result) error {
 	start := time.Now()
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", address(request))
@@ -152,7 +139,6 @@ func probeTCP(ctx context.Context, request Request, payload AgentPayload, result
 	return nil
 }
 
-// probeUDP sends a datagram and waits for its answer.
 func probeUDP(ctx context.Context, request Request, payload AgentPayload, result *Result) error {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "udp", address(request))
@@ -193,7 +179,6 @@ func probeUDP(ctx context.Context, request Request, payload AgentPayload, result
 	return nil
 }
 
-// probeDNS asks a resolver for one name and reports what came back.
 func probeDNS(ctx context.Context, request Request, payload AgentPayload, result *Result) error {
 	query, err := packet.MarshalQuery(1, request.Name)
 	if err != nil {
@@ -245,13 +230,12 @@ func probeDNS(ctx context.Context, request Request, payload AgentPayload, result
 	return &resolverError{code: packet.DNSRCodeNotFound}
 }
 
-// probeTLS completes a handshake and optionally carries a payload round trip.
 func probeTLS(ctx context.Context, request Request, payload AgentPayload, result *Result) error {
 	dialer := &tls.Dialer{
 		NetDialer: &net.Dialer{},
 		Config: &tls.Config{
 			ServerName:         request.Name,
-			InsecureSkipVerify: !request.VerifyCertificate, //nolint:gosec // a laboratory service presents a certificate this build generated; verification is a separate option.
+			InsecureSkipVerify: !request.VerifyCertificate,
 			MinVersion:         tls.VersionTLS12,
 		},
 	}
@@ -280,12 +264,11 @@ func probeTLS(ctx context.Context, request Request, payload AgentPayload, result
 	return nil
 }
 
-// probeHTTP asks for one resource and reads a bounded body.
 func probeHTTP(ctx context.Context, request Request, payload AgentPayload, result *Result) error {
 	client := &http.Client{
 		Transport: &http.Transport{
 			DialContext:         (&net.Dialer{}).DialContext,
-			TLSClientConfig:     &tls.Config{InsecureSkipVerify: !request.VerifyCertificate, MinVersion: tls.VersionTLS12}, //nolint:gosec // laboratory service, see probeTLS
+			TLSClientConfig:     &tls.Config{InsecureSkipVerify: !request.VerifyCertificate, MinVersion: tls.VersionTLS12},
 			TLSHandshakeTimeout: request.Timeout,
 			DisableKeepAlives:   true,
 		},
@@ -299,7 +282,7 @@ func probeHTTP(ctx context.Context, request Request, payload AgentPayload, resul
 	if err != nil {
 		return err
 	}
-	response, err := client.Do(request2) //nolint:gosec // the URL is built from a validated address, a validated port and a validated path.
+	response, err := client.Do(request2)
 	if err != nil {
 		return err
 	}
@@ -324,7 +307,6 @@ func probeHTTP(ctx context.Context, request Request, payload AgentPayload, resul
 	return &statusError{status: response.StatusCode, want: want}
 }
 
-// roundTrip writes a payload and reads the same number of bytes back.
 func roundTrip(ctx context.Context, conn net.Conn, size, maxResponse int) (int, int, error) {
 	if size > maxResponse {
 		size = maxResponse
@@ -349,8 +331,6 @@ func roundTrip(ctx context.Context, conn net.Conn, size, maxResponse int) (int, 
 	return size, read, nil
 }
 
-// readBounded reads at most limit bytes and reports whether the body was
-// longer, so a large response is described rather than buffered.
 func readBounded(reader io.Reader, limit int) ([]byte, bool, error) {
 	if limit <= 0 {
 		limit = 65_507
@@ -365,7 +345,6 @@ func readBounded(reader io.Reader, limit int) ([]byte, bool, error) {
 	return body, false, nil
 }
 
-// url builds a probe URL from validated parts.
 func url(scheme string, request Request) string {
 	return scheme + "://" + address(request) + path(request)
 }
@@ -391,12 +370,10 @@ func versionName(version uint16) string {
 	}
 }
 
-// resolverError is an answer from a resolver that is not an address.
 type resolverError struct{ code uint16 }
 
 func (e *resolverError) Error() string { return "the resolver answered " + packet.RCodeName(e.code) }
 
-// statusError is a response that arrived but was not the one asked for.
 type statusError struct{ status, want int }
 
 func (e *statusError) Error() string {
@@ -406,8 +383,6 @@ func (e *statusError) Error() string {
 	return "the server answered HTTP " + strconv.Itoa(e.status) + ", the probe wanted " + strconv.Itoa(e.want)
 }
 
-// classifyTLS tells a handshake failure apart from a network failure, so a
-// certificate problem is never reported as an unreachable host.
 func classifyTLS(err error) error {
 	var record tls.RecordHeaderError
 	if errors.As(err, &record) {
@@ -439,18 +414,11 @@ func isTLSHandshakeText(text string) bool {
 	return false
 }
 
-// tlsError marks a failure that happened in the handshake rather than on the
-// path to it.
 type tlsError struct{ err error }
 
 func (e *tlsError) Error() string { return e.err.Error() }
 func (e *tlsError) Unwrap() error { return e.err }
 
-// systemError returns the name of the system error inside err, or an empty
-// string when there is none. The names are the ones the operating system gives
-// its own errors, which is what a dial failure carries; reading them here keeps
-// the syscall package out of a probe, so the process boundary stays where
-// processes are actually controlled.
 func systemError(err error) string {
 	var sysErr *os.SyscallError
 	if errors.As(err, &sysErr) {
@@ -459,9 +427,6 @@ func systemError(err error) string {
 	return ""
 }
 
-// Classify turns a network error into the failure a diagnosis branches on. It
-// is exported because a service in the laboratory may need to describe its own
-// refusals the same way.
 func Classify(err error) Failure {
 	if err == nil {
 		return FailureNone
@@ -488,8 +453,7 @@ func Classify(err error) Failure {
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) ||
 		errors.Is(err, context.Canceled) {
-		// A probe that ran out of time or was called off did not get its
-		// answer, which is what this category means.
+
 		return FailureTimeout
 	}
 	switch systemError(err) {
@@ -514,7 +478,6 @@ func Classify(err error) Failure {
 			return FailureDNS
 		}
 	}
-	// A failure that is none of the above is still a failure, and calling it a
-	// timeout would be a guess a diagnosis could act on.
+
 	return FailureUnknown
 }

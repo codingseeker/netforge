@@ -11,43 +11,28 @@ import (
 	"github.com/netforge/netforge/internal/iface"
 )
 
-// The traffic control program and the fixed parts of the argument vectors.
 const (
 	tcProgram = "tc"
 
-	// latencyUnit is the token bucket queueing limit. It bounds how long a
-	// packet may sit in the bucket, which is what turns a rate ceiling into
-	// observable queueing delay instead of unbounded delay.
 	latencyUnit = time.Second
 
-	// burstFloor keeps the bucket at least two maximum transmission units
-	// deep, so a very low rate still has room for a full sized packet.
 	burstFloor = 3000
 )
 
-// The traffic control subcommands, kept together so the argument vectors in
-// one place can be read against the kernel's own spelling.
 var (
 	replaceRoot = []string{"qdisc", "replace"}
 	deleteRoot  = []string{"qdisc", "del"}
 	showJSON    = []string{"-j", "qdisc", "show"}
 )
 
-// plan is the argument vector sequence that installs a fault on a device.
 type plan struct {
-	// clear removes whatever qdisc the device already carries. A replace
-	// merges netem options instead of resetting them, so a fresh fault has to
-	// start from an empty queue discipline.
 	clear []string
-	// root installs the shape of the fault, either on its own or as the token
-	// bucket of a bandwidth fault.
+
 	root []string
-	// kind is the qdisc kind expected at the root once the plan is installed.
+
 	kind string
 }
 
-// buildPlan turns validated parameters into the commands that install them.
-// It is a pure function so the argument vectors can be asserted exactly.
 func buildPlan(device string, p Parameters) (plan, error) {
 	const op = "chaos.buildPlan"
 
@@ -58,9 +43,7 @@ func buildPlan(device string, p Parameters) (plan, error) {
 	clear = append(clear, "dev", device, "root")
 
 	if p.Rate > 0 {
-		// A rate ceiling is a token bucket on its own. The bucket already owns
-		// the queue, so a discipline below it would only add a second thing to
-		// go wrong without changing what the fault does.
+
 		root := append([]string{tcProgram}, replaceRoot...)
 		root = append(root, "dev", device, "root")
 		root = append(root, tokenBucketArgs(p.Rate)...)
@@ -77,9 +60,6 @@ func buildPlan(device string, p Parameters) (plan, error) {
 	return plan{clear: clear, root: root, kind: "netem"}, nil
 }
 
-// tokenBucketArgs renders the token bucket that enforces a rate ceiling. The
-// burst is a fixed fraction of one second of traffic, never more than a tenth
-// of the ceiling, so a low rate is smoothed without hiding the limit.
 func tokenBucketArgs(bitsPerSecond uint64) []string {
 	bytesPerSecond := bitsPerSecond / 8
 	burst := bytesPerSecond / 10
@@ -95,7 +75,6 @@ func tokenBucketArgs(bitsPerSecond uint64) []string {
 	}
 }
 
-// netemArgs renders the netem options in a fixed order.
 func netemArgs(p Parameters) ([]string, error) {
 	const op = "chaos.netemArgs"
 	if p.empty() {
@@ -124,31 +103,24 @@ func netemArgs(p Parameters) ([]string, error) {
 		args = append(args, "duplicate", p.Duplication.String())
 	}
 	if p.Reordering > 0 {
-		// The kernel reads the gap only after an explicit correlation
-		// argument and only when the gap keyword introduces it, so both are
-		// always written out even when they are at their default. The
-		// correlation stays at what was asked for: the kernel accepts zero,
-		// and raising it here would apply a fault the caller never asked for.
+
 		args = append(args, "reorder", p.Reordering.String(), p.Correlation.String(), "gap", strconv.Itoa(p.Gap))
 	}
 	return args, nil
 }
 
-// showArgs renders the read only inspection of a device.
 func showArgs(device string) []string {
 	args := []string{tcProgram}
 	args = append(args, showJSON...)
 	return append(args, "dev", device)
 }
 
-// delArgs renders the removal of the whole queue discipline of a device.
 func delArgs(device string) []string {
 	args := []string{tcProgram}
 	args = append(args, deleteRoot...)
 	return append(args, "dev", device, "root")
 }
 
-// qdiscState is the subset of the kernel's own report that the engine needs.
 type qdiscState struct {
 	Kind    string          `json:"kind"`
 	Handle  string          `json:"handle"`
@@ -184,9 +156,6 @@ type tbfState struct {
 	Lat   uint64 `json:"lat"`
 }
 
-// parseState decodes the kernel report of a device. Unparsable output is an
-// error rather than an empty state, so a fault is never reported as applied
-// because the answer could not be read.
 func parseState(stdout string) ([]qdiscState, error) {
 	const op = "chaos.parseState"
 	trimmed := strings.TrimSpace(stdout)
@@ -203,9 +172,6 @@ func parseState(stdout string) ([]qdiscState, error) {
 	return states, nil
 }
 
-// installed reports whether a queue discipline of one of the fault kinds is
-// present on the device. A device without one carries the kernel default, the
-// empty discipline, which counts as absent.
 func installed(states []qdiscState) bool {
 	for _, state := range states {
 		if state.Kind == "netem" || state.Kind == "tbf" {
@@ -215,7 +181,6 @@ func installed(states []qdiscState) bool {
 	return false
 }
 
-// rootOf returns the root queue discipline of a device.
 func rootOf(states []qdiscState) (qdiscState, bool) {
 	for _, state := range states {
 		if state.Root {
@@ -225,8 +190,6 @@ func rootOf(states []qdiscState) (qdiscState, bool) {
 	return qdiscState{}, false
 }
 
-// observe reads the kernel report and turns it into the evidence stored in a
-// fault record. The values come from the kernel, never from the request.
 func observe(states []qdiscState, device string, p Parameters) (Observed, error) {
 	const op = "chaos.observe"
 	root, ok := rootOf(states)
@@ -244,8 +207,7 @@ func observe(states []qdiscState, device string, p Parameters) (Observed, error)
 		if err := json.Unmarshal(root.Options, &bucket); err != nil {
 			return Observed{}, apperr.IO(op, "the token bucket state is not readable", err)
 		}
-		// The kernel keeps the rate in bytes per second and the queueing limit
-		// in microseconds, so both are converted back before being reported.
+
 		seen.Rate = bucket.Rate * 8
 		seen.Burst = bucket.Burst
 		if want := p.Rate / 8; bucket.Rate != want {
@@ -300,9 +262,6 @@ func mergeNetem(seen Observed, netem netemState) Observed {
 	return seen
 }
 
-// verify compares the kernel state with the requested parameters. Anything the
-// kernel did not install is reported as a verification failure, which is what
-// keeps a configured value from being passed off as an applied one.
 func verify(seen Observed, p Parameters) error {
 	const op = "chaos.verify"
 
@@ -337,7 +296,6 @@ func verify(seen Observed, p Parameters) error {
 	return nil
 }
 
-// kindName names the fault a parameter set belongs to, for error messages.
 func (p Parameters) kindName() string {
 	switch {
 	case p.Rate > 0:
@@ -359,8 +317,6 @@ func seconds(value float64) time.Duration {
 	return time.Duration(value * float64(time.Second))
 }
 
-// equalDuration compares two durations at the resolution the kernel reports,
-// which is a microsecond.
 func equalDuration(got, want Duration) bool {
 	const resolution = time.Microsecond
 	difference := got.Std() - want.Std()
@@ -370,8 +326,6 @@ func equalDuration(got, want Duration) bool {
 	return difference <= resolution
 }
 
-// equalPercent compares two percentages at the resolution the kernel reports,
-// which is a hundredth of a percent.
 func equalPercent(got, want Percent) bool {
 	const resolution = 0.01
 	difference := float64(got) - float64(want)

@@ -150,10 +150,6 @@ func TestProcSysNetPathKeepsTheWholePrefix(t *testing.T) {
 	}
 }
 
-// TestHolderPipesAreHeldNotGarbage is the in-process half of the holder's
-// lifetime. The pipes are what tell a holder its agent is gone; if the garbage
-// collector closed one, the holder would exit while its namespace was still in
-// use, so the registry has to keep them reachable for as long as the agent runs.
 func TestHolderPipesAreHeldNotGarbage(t *testing.T) {
 	read, feed, err := os.Pipe()
 	if err != nil {
@@ -162,8 +158,6 @@ func TestHolderPipesAreHeldNotGarbage(t *testing.T) {
 	defer func() { _ = read.Close() }()
 	holdPipe(feed)
 
-	// A collection and a settled heap, which is what would finalize an
-	// unreachable os.File and close its descriptor.
 	for i := 0; i < 4; i++ {
 		_ = make([]byte, 1024)
 	}
@@ -179,9 +173,6 @@ func TestHolderPipesAreHeldNotGarbage(t *testing.T) {
 	}
 }
 
-// TestReleasePipesIsIdempotent checks that the teardown path can be reached more
-// than once, which it is when an agent is stopped after a laboratory has already
-// been released.
 func TestReleasePipesIsIdempotent(t *testing.T) {
 	releasePipes()
 	releasePipes()

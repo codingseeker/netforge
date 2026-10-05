@@ -26,14 +26,6 @@ const (
 	acceptanceExpLabID = "nf-acceptance"
 )
 
-// The topology an acceptance run uses is a client, a software router, and three
-// server namespaces that serve network endpoints. The router is the single hop
-// every request crosses and the three server namespaces are the backends, so the
-// acceptance's "load balancer" is the router and its three "services" are the
-// namespaces behind it. The path the experiment measures (client to server0) is
-// the very path a request to the first service crosses, so recovering that path
-// is recovering the service's reachability.
-
 var (
 	acceptanceRouter  = "nf-router-" + acceptanceLabID
 	acceptanceClient  = "nf-client0-" + acceptanceLabID
@@ -46,8 +38,6 @@ var (
 	servicePorts        = []uint16{9104, 9105, 9106}
 )
 
-// acceptanceServiceSpecs are the three backends an acceptance laboratory
-// serves, one echo endpoint per server namespace.
 func acceptanceServiceSpecs(id string) []network.ServiceSpec {
 	return []network.ServiceSpec{
 		{Namespace: "nf-server0-" + id, TCPPort: servicePorts[0], MaxRequest: 4096, Timeout: 30 * time.Second},
@@ -56,9 +46,6 @@ func acceptanceServiceSpecs(id string) []network.ServiceSpec {
 	}
 }
 
-// acceptanceLabSpec is the full laboratory an acceptance step runs against: one
-// client, three servers, the budgets a loss and a latency fault need, and the
-// three services those servers serve.
 func acceptanceLabSpec(id string) network.Spec {
 	spec := labSpec(id)
 	spec.Servers = 3
@@ -86,10 +73,6 @@ func probeLimitsForAcceptance() probe.Limits {
 	}
 }
 
-// acceptanceDocument is the document the acceptance experiment is compiled
-// from. It grants the namespaces of the experiment laboratory and declares the
-// two faults the acceptance injects at the load-balancing hop: packet loss and
-// deterministic latency.
 func acceptanceDocument(t *testing.T, name string) config.Config {
 	t.Helper()
 	raw := "name: " + name + "\n" +
@@ -108,9 +91,6 @@ func acceptanceDocument(t *testing.T, name string) config.Config {
 	return *document
 }
 
-// acceptanceObservation is what the acceptance experiment measures: from the
-// client namespace, of the first server's address, which is the address the
-// first service is reached at.
 func acceptanceObservation() experiment.Observation {
 	return experiment.Observation{
 		Namespace:  "nf-client0-" + acceptanceExpLabID,
@@ -127,9 +107,6 @@ func acceptanceObservation() experiment.Observation {
 	}
 }
 
-// acceptanceExpAddress is the address of the experiment laboratory's first
-// server, derived from the same plan builder the laboratory itself uses so the
-// observation never points at an address the laboratory would not create.
 func acceptanceExpAddress() string {
 	plan, err := network.BuildPlan(acceptanceExpLabID, "10.42.0.0/24", 1, 3, 1500)
 	if err != nil {
@@ -138,8 +115,6 @@ func acceptanceExpAddress() string {
 	return plan.Nodes[1].Address.Addr().String()
 }
 
-// acceptanceServerAddresses are the addresses of an acceptance laboratory's
-// three server namespaces, in order.
 func acceptanceServerAddresses() []string {
 	plan, err := network.BuildPlan(acceptanceLabID, "10.42.0.0/24", 1, 3, 1500)
 	if err != nil {
@@ -152,9 +127,6 @@ func acceptanceServerAddresses() []string {
 	return addresses
 }
 
-// buildAcceptanceExperimentLab is the laboratory builder an acceptance run is
-// bound to: it pins the identifier the document already named so the created
-// namespaces are the ones the document grants.
 func buildAcceptanceExperimentLab(t *testing.T) func(context.Context, network.Spec) (*network.Lab, error) {
 	t.Helper()
 	return func(ctx context.Context, spec network.Spec) (*network.Lab, error) {
@@ -172,8 +144,6 @@ func buildAcceptanceExperimentLab(t *testing.T) func(context.Context, network.Sp
 	}
 }
 
-// runAcceptance compiles and runs the acceptance experiment against a real
-// laboratory, exactly as the phase before it did.
 func runAcceptance(t *testing.T, document config.Config, requests []recovery.Request) (experiment.Report, experiment.LabEnvironment) {
 	t.Helper()
 	plan, err := experiment.Compile(document, acceptanceObservation(), requests,
@@ -196,8 +166,6 @@ func runAcceptance(t *testing.T, document config.Config, requests []recovery.Req
 	return report_, *environment
 }
 
-// serviceProbe asks a service in the lab to answer a TCP probe from the client
-// namespace, and fails the step when it does not.
 func serviceProbe(t *testing.T, lab *network.Lab, clientNamespace, target string, port uint16) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -218,14 +186,11 @@ func serviceProbe(t *testing.T, lab *network.Lab, clientNamespace, target string
 	}
 }
 
-// step runs one numbered step of the acceptance workflow.
 func step(t *testing.T, n int, label string, check func(*testing.T)) {
 	t.Helper()
 	t.Run(fmt.Sprintf("%02d %s", n, label), check)
 }
 
-// acceptanceHostLeaks returns every host network object that still carries
-// either laboratory's identity.
 func acceptanceHostLeaks() (leaks []string) {
 	for _, probe := range [][]string{
 		{"ip", "-o", "link", "show"},
@@ -246,11 +211,6 @@ func acceptanceHostLeaks() (leaks []string) {
 	return leaks
 }
 
-// TestTheFinalAcceptanceWorkflow walks the whole acceptance checklist against a
-// real laboratory: provision, scope, observe, fault, diagnose, recover with
-// consent, verify, report, and release. It is the workflow section 21 of
-// `todo.md` names, end to end, and it is the last thing the suite runs before
-// the phase is closed.
 func TestTheFinalAcceptanceWorkflow(t *testing.T) {
 	document := acceptanceDocument(t, "nf-acceptance")
 

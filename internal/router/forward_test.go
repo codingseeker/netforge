@@ -45,9 +45,6 @@ func echoFrame(t *testing.T, source, destination string, ttl uint8) []byte {
 	return frame
 }
 
-// datagramFrame and segmentFrame build the two transport frames the router
-// forwards, because the checksum a forwarder has to repair only shows up on a
-// packet whose sender left the sum unfinished.
 func datagramFrame(t *testing.T, source, destination string, ttl uint8, payload []byte) []byte {
 	t.Helper()
 	frame, err := packet.Datagram(
@@ -163,11 +160,6 @@ func TestForwardingAnswersTheReturnPath(t *testing.T) {
 	}
 }
 
-// A frame read from a packet socket is the frame as it is on the wire, and a
-// sender whose stack offloads its transport sum leaves only the seed of the
-// checksum in those bytes. The router therefore recomputes the checksum it
-// forwards; this is the case a real connection hits, because ICMP computes its
-// own sum and crosses fine while a handshake does not.
 func TestForwardingRepairsATransportChecksumTheSenderLeftUnfinished(t *testing.T) {
 	r := testRouter(t)
 	for _, test := range []struct {
@@ -223,9 +215,7 @@ func TestForwardingRepairsATransportChecksumTheSenderLeftUnfinished(t *testing.T
 			if err != nil {
 				t.Fatalf("ParseFrame: %v", err)
 			}
-			// The checksum is overwritten with a value that does not verify,
-			// which is what the bytes hold when the sending stack never finished
-			// the sum.
+
 			seeded, err := parsed.Link.Serialize(r.limits)
 			if err != nil {
 				t.Fatalf("Serialize: %v", err)
@@ -244,9 +234,6 @@ func TestForwardingRepairsATransportChecksumTheSenderLeftUnfinished(t *testing.T
 	}
 }
 
-// A packet larger than the link it would leave by cannot be forwarded, and the
-// router answers with the size the sender has to fit inside rather than dropping
-// the packet and letting the sender discover the limit by silence.
 func TestAPacketTooLargeForTheNextLinkIsAnsweredNotDropped(t *testing.T) {
 	r := testRouter(t)
 	for _, dev := range r.devices {
@@ -283,16 +270,12 @@ func TestAPacketTooLargeForTheNextLinkIsAnsweredNotDropped(t *testing.T) {
 		t.Errorf("the answer went to %s, want the sender", out.IP.Destination)
 	}
 
-	// A packet that fits is still forwarded, so the refusal is a decision about
-	// size and not a broken path.
 	small := echoFrame(t, "10.42.0.2", "10.42.0.6", 64)
 	if step := r.decide(r.byName["nfr-c0"], small); step.kind != forwardFrame {
 		t.Errorf("a packet that fits was not forwarded: %d (%s)", step.kind, step.reason)
 	}
 }
 
-// The size a device reports is the bound, and a configuration that says nothing
-// is read as the laboratory's own default rather than as unlimited.
 func TestADeviceWithoutAnMTUStillHasOne(t *testing.T) {
 	r := testRouter(t)
 	for _, dev := range r.devices {

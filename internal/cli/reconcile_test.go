@@ -12,11 +12,6 @@ import (
 	"github.com/netforge/netforge/internal/reconcile"
 )
 
-// The reconcile commands are the only ones here that delete anything, so the
-// refusals are the tests that matter most. Every one of them runs against a state
-// root of the test's own: a command that is safe is a command that is safe on a
-// shared temporary directory, and that has to be shown on one.
-
 func phase15Root(t *testing.T) string {
 	t.Helper()
 	return t.TempDir()
@@ -58,8 +53,7 @@ func TestReconcileListNamesTheIdentifierKindAndAge(t *testing.T) {
 }
 
 func TestReconcileListTellsTheTwoKindsApart(t *testing.T) {
-	// The marker records what the directory is for, which is what makes a listing
-	// of a shared root readable at all.
+
 	root := phase15Root(t)
 	phase15Create(t, root, reconcile.KindLaboratory, "nfp15")
 	routerDir := phase15Create(t, root, reconcile.KindRouter, "nfp15")
@@ -81,8 +75,7 @@ func TestReconcileListTellsTheTwoKindsApart(t *testing.T) {
 }
 
 func TestReconcileListClaimsNothingItCannotProve(t *testing.T) {
-	// A directory carrying a name NetForge would have generated, with nothing
-	// inside it, is not NetForge's. The listing says so and makes no claim.
+
 	root := phase15Root(t)
 	forged := filepath.Join(root, "netforge-lab-000000000000")
 	if err := os.Mkdir(forged, 0o700); err != nil {
@@ -98,17 +91,14 @@ func TestReconcileListClaimsNothingItCannotProve(t *testing.T) {
 	if !strings.Contains(result.stdout, "0 identified as NetForge's, 1 not identified") {
 		t.Errorf("the listing claims ownership it does not have:\n%s", result.stdout)
 	}
-	// Nothing is identified, so nothing may be reclaimed: the listing must not
-	// print the command that would.
+
 	if strings.Contains(result.stdout, "netforge reconcile reclaim") {
 		t.Errorf("the listing suggests reclaiming something it did not identify:\n%s", result.stdout)
 	}
 }
 
 func TestReconcileListOfACleanHostSaysSo(t *testing.T) {
-	// The requirement that a normal run leaves nothing for the reconciler to
-	// find: this is what such a listing looks like, and a reader has to be able
-	// to tell it from a broken one.
+
 	result := phase15List(t, phase15Root(t))
 	if result.err != nil {
 		t.Fatalf("Run(reconcile list) = %v, want nil", result.err)
@@ -138,8 +128,7 @@ func TestReclaimIsRefusedWithoutAuthorization(t *testing.T) {
 }
 
 func TestReclaimIsRefusedWithoutAReason(t *testing.T) {
-	// The same rule a recovery follows, and for the same reason: a later reader
-	// has to be able to see why something was deleted.
+
 	root := phase15Root(t)
 	path := phase15Create(t, root, reconcile.KindLaboratory, "nfp15")
 	result := run(t, context.Background(), "",
@@ -159,8 +148,7 @@ func TestReclaimIsRefusedWithoutAReason(t *testing.T) {
 }
 
 func TestReclaimRefusesANameItDoesNotGenerate(t *testing.T) {
-	// Refused before any filesystem call: a name that is not a single path element
-	// naming a directory NetForge generates cannot carry a way out of the root.
+
 	root := phase15Root(t)
 	for _, name := range []string{"..", "/etc", "../escape", "someone-elses-directory"} {
 		t.Run(name, func(t *testing.T) {
@@ -178,9 +166,7 @@ func TestReclaimRefusesANameItDoesNotGenerate(t *testing.T) {
 }
 
 func TestReclaimRefusesADirectoryThatIsStillInUse(t *testing.T) {
-	// The directory was created by this test process, so the marker names a live
-	// owner. Reconciling must not pull the state out from under a running
-	// laboratory, and the command has to say that rather than fail obscurely.
+
 	root := phase15Root(t)
 	path := phase15Create(t, root, reconcile.KindLaboratory, "nfp15")
 	result := run(t, context.Background(), "",
@@ -204,8 +190,7 @@ func TestReclaimRefusesADirectoryThatIsStillInUse(t *testing.T) {
 }
 
 func TestReclaimReportsWhatItRemovedAndIsIdempotent(t *testing.T) {
-	// Reconciling twice must remove nothing the second time and must not fail:
-	// a second pass is what an operator runs to check the first one worked.
+
 	root := phase15Root(t)
 	path := phase15Create(t, root, reconcile.KindLaboratory, "nfp15")
 	deadOwner(t, path)
@@ -255,9 +240,7 @@ func TestReclaimCarriesTheReasonIntoItsReport(t *testing.T) {
 }
 
 func TestReclaimLeavesAnUnidentifiedDirectoryAlone(t *testing.T) {
-	// Authorized or not, a directory with no valid marker is not a candidate.
-	// The authorization names it, so what refuses it is the ownership check at
-	// the moment of removal rather than the name check at authorization time.
+
 	root := phase15Root(t)
 	forged := filepath.Join(root, "netforge-lab-000000000000")
 	if err := os.Mkdir(forged, 0o700); err != nil {
@@ -281,9 +264,7 @@ func TestReclaimLeavesAnUnidentifiedDirectoryAlone(t *testing.T) {
 }
 
 func TestAnOlderThanGateRefusesAYoungDirectory(t *testing.T) {
-	// An operator who says "older than an hour" is expressing a fear about a run
-	// that may still be starting, and that fear is worth honouring even though
-	// the marker already refuses a live owner.
+
 	root := phase15Root(t)
 	path := phase15Create(t, root, reconcile.KindLaboratory, "nfp15")
 	deadOwner(t, path)
@@ -321,9 +302,7 @@ func TestReconcileRefusesExtraArgumentsAndUnknownSubcommands(t *testing.T) {
 }
 
 func TestReconcileAppearsInHelp(t *testing.T) {
-	// The command line is its own documentation, including for the command that
-	// deletes things: an operator has to be able to find it and read what it
-	// requires before running it.
+
 	root := run(t, context.Background(), "", "help")
 	if !strings.Contains(root.stdout, "reconcile") {
 		t.Errorf("the root help does not mention the reconcile command:\n%s", root.stdout)
@@ -349,8 +328,7 @@ func TestReconcileAppearsInHelp(t *testing.T) {
 }
 
 func TestTheStateRootDefaultsToTheSystemTemporaryDirectory(t *testing.T) {
-	// The environment variable is a fallback, not a requirement, and a flag
-	// always wins over it: the value a run acted on is the value its output names.
+
 	t.Setenv(reconcile.StateRootEnv, "/nonexistent/netforge-state")
 	result := run(t, context.Background(), "", "reconcile", "list")
 	if result.err != nil {
@@ -367,7 +345,6 @@ func TestTheStateRootDefaultsToTheSystemTemporaryDirectory(t *testing.T) {
 	}
 }
 
-// listingLine returns the line of a listing that carries a fragment.
 func listingLine(listing, fragment string) string {
 	for _, line := range strings.Split(listing, "\n") {
 		if strings.Contains(line, fragment) {
@@ -377,8 +354,6 @@ func listingLine(listing, fragment string) string {
 	return ""
 }
 
-// deadOwner rewrites a marker so it names a process that is not running, which is
-// the state a SIGKILLed run's directory is in.
 func deadOwner(t *testing.T, path string) {
 	t.Helper()
 	marker, err := reconcile.ReadMarker(path)
@@ -396,7 +371,6 @@ func deadOwner(t *testing.T, path string) {
 	}
 }
 
-// unusedPID returns a process identifier that is not running.
 func unusedPID(t *testing.T) int {
 	t.Helper()
 	high := 1 << 22
@@ -409,19 +383,13 @@ func unusedPID(t *testing.T) int {
 	return 0
 }
 
-// findProcess reports whether a process identifier is running. It reads /proc
-// rather than signalling, so asking the question cannot become an action against
-// a process the test does not own.
 func findProcess(pid int) error {
 	_, err := os.Stat("/proc/" + strconv.Itoa(pid))
 	return err
 }
 
-// TestReconcileResolvesItsStateRoot covers the two ways a root is chosen and the
-// refusal when neither works, because a reconcile pointed at nothing must say so
-// rather than list the process's working directory.
 func TestReconcileResolvesItsStateRoot(t *testing.T) {
-	// A flag wins over the environment.
+
 	flagged := phase15Root(t)
 	phase15Create(t, flagged, reconcile.KindLaboratory, "nfp15")
 	t.Setenv(reconcile.StateRootEnv, phase15Root(t))
@@ -429,14 +397,14 @@ func TestReconcileResolvesItsStateRoot(t *testing.T) {
 	if !strings.Contains(result.stdout, "nfp15") {
 		t.Errorf("the flag did not win over the environment:\n%s", result.stdout)
 	}
-	// With neither, the environment is used.
+
 	fromEnv := phase15Root(t)
 	phase15Create(t, fromEnv, reconcile.KindRouter, "nfp15")
 	t.Setenv(reconcile.StateRootEnv, fromEnv)
 	if got := run(t, context.Background(), "", "reconcile", "list"); !strings.Contains(got.stdout, "router") {
 		t.Errorf("the environment's root was not used:\n%s", got.stdout)
 	}
-	// A state root that is not a directory is refused, not listed.
+
 	file := filepath.Join(t.TempDir(), "a-file")
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
@@ -450,8 +418,6 @@ func TestReconcileResolvesItsStateRoot(t *testing.T) {
 	}
 }
 
-// TestASingularRefusalIsReportedAsOne checks the wording of a single refusal, so
-// the report does not say "1 names" or hide a lone refusal behind a plural.
 func TestASingularRefusalIsReportedAsOne(t *testing.T) {
 	root := phase15Root(t)
 	path := phase15Create(t, root, reconcile.KindLaboratory, "nfp15")

@@ -9,17 +9,6 @@ import (
 	"github.com/netforge/netforge/internal/packet"
 )
 
-// The audit works from frames that are known to be well formed and then breaks
-// one thing about each of them. A parser that only ever sees correct input
-// proves nothing about a laboratory that will eventually be handed a corrupted
-// one, so every case below is a real frame with exactly one thing wrong, and
-// the requirement is always the same: refuse it, never half-read it, and never
-// allocate on the strength of a length the bytes do not support.
-//
-// The frames are the laboratory's own: an echo request over the wire the router
-// forwards, a datagram, and a TCP segment. Their checksums verify as they
-// stand, so a case that changes a header also has to repair the checksum or it
-// would be refused for the wrong reason.
 var (
 	auditEchoFrame = mustDecode("020000000001020000000002080045000028123400004001544b0a2a00020a2a00010800aa3c1234000170696e672d7061796c6f6164")
 	auditUDPFrame  = mustDecode("020000000001020000000002080045000024123400004011543f0a2a00010a2a0002003514e900101cb66e6574666f726765")
@@ -27,9 +16,6 @@ var (
 	auditARPFrame  = mustDecode("ffffffffffff020000000001080600010800060400010200000000010200000000020a2a0001")
 )
 
-// mustDecode reads one of the audit's own frames at package set-up. A frame
-// that is not valid hex is a mistake in this file rather than a finding about
-// the product, so it stops the run instead of being reported as one.
 func mustDecode(encoded string) []byte {
 	data, err := hex.DecodeString(encoded)
 	if err != nil {
@@ -38,16 +24,10 @@ func mustDecode(encoded string) []byte {
 	return data
 }
 
-// clone copies a frame so a case can corrupt one byte of it without changing
-// the frame the next case starts from.
 func clone(data []byte) []byte {
 	return append([]byte(nil), data...)
 }
 
-// TestTheAuditFramesAreWellFormed first. A corpus of hostile frames proves
-// nothing if the frames it corrupts were already refused, so the audit states
-// up front that each of its baselines parses and round trips before it starts
-// breaking them.
 func TestTheAuditFramesAreWellFormed(t *testing.T) {
 	limits := packet.DefaultLimits()
 	for name, data := range map[string][]byte{
@@ -71,10 +51,6 @@ func TestTheAuditFramesAreWellFormed(t *testing.T) {
 	}
 }
 
-// TestMalformedPacketsAreRefused corrupts one header field of each frame at a
-// time. A frame whose declared lengths, version or addresses disagree with its
-// own bytes is not a frame, and reading it anyway is how a laboratory forwards
-// a packet it never understood.
 func TestMalformedPacketsAreRefused(t *testing.T) {
 	const (
 		ethernetHeader = packet.EthernetHeaderSize
@@ -126,11 +102,6 @@ func TestMalformedPacketsAreRefused(t *testing.T) {
 	}
 }
 
-// TestTruncatedPacketsAreRefusedAtEveryLength takes one well formed frame and
-// tries every prefix of it. This is the property a laboratory depends on: a
-// frame the wire cut short must be refused at whatever length it arrived,
-// because the length is exactly the thing a truncation destroys. Testing one
-// hand-picked truncation proves only that one.
 func TestTruncatedPacketsAreRefusedAtEveryLength(t *testing.T) {
 	limits := packet.DefaultLimits()
 	for name, data := range map[string][]byte{
@@ -148,10 +119,6 @@ func TestTruncatedPacketsAreRefusedAtEveryLength(t *testing.T) {
 	}
 }
 
-// TestACorruptChecksumIsRefusedAndSaysSo flips one bit of each checksum the
-// laboratory verifies. A frame that arrives with a bad checksum is either
-// corrupt or forged, and both are refused; what matters is that the refusal
-// names the checksum rather than reporting a packet whose header did not verify.
 func TestACorruptChecksumIsRefusedAndSaysSo(t *testing.T) {
 	const (
 		ethernetHeader = packet.EthernetHeaderSize
@@ -182,11 +149,6 @@ func TestACorruptChecksumIsRefusedAndSaysSo(t *testing.T) {
 	}
 }
 
-// TestAnUncheckedChecksumIsMarkedRatherThanTrusted turns checksum verification
-// off, which the router does for the packets it builds itself, and requires the
-// result to say so. Verification that can be turned off without leaving a mark
-// is indistinguishable from verification that was never performed, so a packet
-// that skipped the check must not read as one that passed it.
 func TestAnUncheckedChecksumIsMarkedRatherThanTrusted(t *testing.T) {
 	corrupted := clone(auditEchoFrame)
 	corrupted[packet.EthernetHeaderSize+10] ^= 0x01
@@ -206,10 +168,6 @@ func TestAnUncheckedChecksumIsMarkedRatherThanTrusted(t *testing.T) {
 	}
 }
 
-// TestAnOversizePacketIsRefusedRatherThanAllocated offers the parser a frame
-// that claims more payload than the limit allows. The refusal has to come from
-// the limit rather than from the kernel, so the bound is the one the laboratory
-// asked for and not the one the machine happens to have.
 func TestAnOversizePacketIsRefusedRatherThanAllocated(t *testing.T) {
 	limits := packet.DefaultLimits()
 	limits.MaxFrameSize = 128
