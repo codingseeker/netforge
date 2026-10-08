@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/iface"
-	"github.com/netforge/netforge/internal/namespace"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/iface"
+	"github.com/codingseeker/netforge/internal/namespace"
 )
 
 type Kind string

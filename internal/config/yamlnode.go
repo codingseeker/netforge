@@ -5,7 +5,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 func requireScalar(op string, node *yaml.Node, field, example string) (string, error) {

@@ -337,14 +337,46 @@ type phase14LaboratoryReport struct {
 	Services         []phase14Service    `json:"services"`
 	Router           *phase14RouterStats `json:"router"`
 	RouterError      string              `json:"router_error"`
+	Balancer         *runBalancerReport  `json:"balancer"`
 }
 
+type phase14Measurement = phase17Measurement
+
 type phase14RunReport struct {
-	Succeeded    bool                     `json:"succeeded"`
-	CleanedUp    bool                     `json:"cleaned_up"`
-	Laboratory   *phase14LaboratoryReport `json:"laboratory"`
-	Steps        []map[string]any         `json:"steps"`
-	ExperimentID string                   `json:"experiment_id"`
+	Succeeded      bool                     `json:"succeeded"`
+	CleanedUp      bool                     `json:"cleaned_up"`
+	Laboratory     *phase14LaboratoryReport `json:"laboratory"`
+	Baseline       []phase17Measurement     `json:"baseline"`
+	Observed       []phase17Measurement     `json:"observed"`
+	Verified       []phase17Measurement     `json:"verified"`
+	Faults         []phase18FaultRecord     `json:"faults"`
+	Recoveries     []phase18RecoveryRecord  `json:"recoveries"`
+	Steps          []map[string]any         `json:"steps"`
+	ExperimentID   string                   `json:"experiment_id"`
+	Recommendation phase18Recommendation    `json:"recommendation"`
+}
+
+type phase18FaultRecord struct {
+	ID     string `json:"fault_id"`
+	Kind   string `json:"type"`
+	Target string `json:"target"`
+	Status string `json:"status"`
+}
+
+type phase18RecoveryRecord struct {
+	Action string `json:"action"`
+	Target string `json:"target"`
+	From   string `json:"from"`
+	Passed bool   `json:"passed"`
+}
+
+type phase18Recommendation struct {
+	Diagnosed bool   `json:"diagnosed"`
+	Action    string `json:"action"`
+	Target    string `json:"target"`
+	From      string `json:"from"`
+	Flag      string `json:"flag"`
+	Statement string `json:"statement"`
 }
 
 func phase14Laboratory(t *testing.T, encoded string) *phase14LaboratoryReport {
@@ -365,7 +397,48 @@ func phase14Laboratory(t *testing.T, encoded string) *phase14LaboratoryReport {
 	return report.Laboratory
 }
 
+func readRunReport(t *testing.T, encoded string) phase14RunReport {
+	t.Helper()
+	var report phase14RunReport
+	if err := json.Unmarshal([]byte(encoded), &report); err != nil {
+		t.Fatalf("the report is not JSON: %v\n%s", err, encoded)
+	}
+	if report.Laboratory == nil {
+		t.Fatalf("the report carries no laboratory, so it does not say what it built:\n%s", encoded)
+	}
+	return report
+}
+
+func decodeRun(t *testing.T, encoded string) phase14RunReport {
+	t.Helper()
+	report := readRunReport(t, encoded)
+	if !report.Succeeded {
+		t.Fatalf("the run did not succeed:\n%s", encoded)
+	}
+	if !report.CleanedUp {
+		t.Errorf("the run reports it did not clean up:\n%s", encoded)
+	}
+	return report
+}
+
 func runAndReadLaboratory(t *testing.T, document string, flags ...string) *phase14LaboratoryReport {
 	t.Helper()
 	return phase14Laboratory(t, phase14Run(t, document, flags...).stdout)
+}
+
+type runBalancerReport struct {
+	Namespace string               `json:"namespace"`
+	Listen    string               `json:"listen"`
+	Policy    string               `json:"policy"`
+	Backends  []runBalancerBackend `json:"backends"`
+	Healthy   int                  `json:"healthy"`
+}
+
+type runBalancerBackend struct {
+	Address    string `json:"address"`
+	State      string `json:"state"`
+	Accepted   int    `json:"accepted"`
+	Checks     int    `json:"checks"`
+	Failed     int    `json:"failed_checks"`
+	Recoveries int    `json:"recoveries"`
 }

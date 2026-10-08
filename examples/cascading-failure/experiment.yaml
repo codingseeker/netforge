@@ -1,17 +1,15 @@
-
 name: cascading-failure
 
 seed: 123456
 
 scope:
-  network: 10.42.0.0/16
+  network: 10.42.0.0/24
   namespaces:
-    - client
-    - router
-    - lb
-    - service-a
-    - service-b
-    - service-c
+    - nf-client0-demo
+    - nf-server0-demo
+    - nf-server1-demo
+    - nf-balancer0-demo
+    - nf-router-demo
 
 limits:
   max_namespaces: 8
@@ -22,6 +20,6 @@ limits:
   max_concurrent_probes: 64
 
 faults:
-  - target: service-b
+  - target: nf-server0-demo
     type: packet_loss
-    value: 10%
+    value: 80%

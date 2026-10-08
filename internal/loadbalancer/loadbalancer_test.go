@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/transport"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/transport"
 )
 
 func testLimits() Limits {
@@ -130,12 +130,19 @@ func (s *backendServer) admit(conn *transport.Conn) {
 			if s.silent {
 				continue
 			}
-			answer := append([]byte(s.name+"|"), payload...)
+			answer := answerFor(s.name, payload)
 			if _, err := conn.Write(ctx, answer); err != nil {
 				return
 			}
 		}
 	}()
+}
+
+func answerFor(name string, payload []byte) []byte {
+	if transport.IsHealthChallenge(payload) {
+		return []byte(transport.HealthResponse)
+	}
+	return append([]byte(name+"|"), payload...)
 }
 
 func (s *backendServer) stop() {
@@ -502,7 +509,7 @@ func TestNothingThatReachesTheBalancerCanRegisterABackend(t *testing.T) {
 		[]byte(`{"backends":["127.0.0.1:9999"],"policy":"consistent_hash"}`),
 		{0x4e, 0x46, 0x01, 0x02, 0, 0, 0, 1, 0, 0, 0, 0, 0, 20},
 		{0x4e, 0x46, 0x01, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20},
-		[]byte("netforge.health.v1"),
+		[]byte(transport.HealthChallenge),
 	} {
 		if _, err := socket.WriteTo(datagram, mustAddr(t, balancer.Address())); err != nil {
 			t.Fatalf("WriteTo() = %v, want nil", err)

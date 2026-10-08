@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/probe"
 )
 
 type Criteria struct {

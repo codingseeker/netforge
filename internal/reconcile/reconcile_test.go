@@ -4,11 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 const testID = "nfrecon"
@@ -355,7 +356,7 @@ func TestReclaimRemovesTheStateOfADeadOwner(t *testing.T) {
 
 	root := stateRoot(t)
 	path := create(t, root, KindLaboratory, testID)
-	deadened(t, root, path)
+	deadened(t, path)
 	authorization, err := Authorize(root, Request{
 		Names:   []string{filepath.Base(path)},
 		Reason:  "the run that owned it was killed",
@@ -384,7 +385,7 @@ func TestReclaimingTwiceRemovesNothingAndDoesNotFail(t *testing.T) {
 
 	root := stateRoot(t)
 	path := create(t, root, KindLaboratory, testID)
-	deadened(t, root, path)
+	deadened(t, path)
 	authorization, err := Authorize(root, Request{
 		Names:   []string{filepath.Base(path)},
 		Reason:  "the run that owned it was killed",
@@ -508,7 +509,7 @@ func TestReclaimTouchesNothingOutsideTheStateRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := create(t, root, KindLaboratory, testID)
-	deadened(t, root, path)
+	deadened(t, path)
 	authorization, err := Authorize(root, Request{
 		Names:   []string{filepath.Base(path)},
 		Reason:  "the run that owned it was killed",
@@ -525,7 +526,7 @@ func TestReclaimTouchesNothingOutsideTheStateRoot(t *testing.T) {
 	}
 }
 
-func deadened(t *testing.T, root, path string) {
+func deadened(t *testing.T, path string) {
 	t.Helper()
 	marker, err := ReadMarker(path)
 	if err != nil {
@@ -541,7 +542,6 @@ func deadened(t *testing.T, root, path string) {
 	if err := os.Chtimes(path, past, past); err != nil {
 		t.Fatal(err)
 	}
-	_ = root
 }
 
 func goneProcess(t *testing.T) int {
@@ -641,7 +641,7 @@ func TestAnAuthorizationRefusesAStateRootItCannotUse(t *testing.T) {
 func TestAReclaimStopsWhenItsContextIsCancelled(t *testing.T) {
 	root := stateRoot(t)
 	path := create(t, root, KindLaboratory, testID)
-	deadened(t, root, path)
+	deadened(t, path)
 	authorization, err := Authorize(root, Request{
 		Names:   []string{filepath.Base(path)},
 		Reason:  "the run that owned it was killed",
@@ -702,7 +702,7 @@ func TestAWriteMarkerThatCannotBePublishedLeavesNothingTrustworthy(t *testing.T)
 func TestAReportNamesBothSidesOfWhatHappened(t *testing.T) {
 	root := stateRoot(t)
 	gone := create(t, root, KindLaboratory, testID)
-	deadened(t, root, gone)
+	deadened(t, gone)
 	live := create(t, root, KindRouter, testID)
 	authorization, err := Authorize(root, Request{
 		Names:   []string{filepath.Base(gone), filepath.Base(live)},
@@ -753,5 +753,46 @@ func TestTheStateRootIsTheTemporaryDirectoryUnlessTheEnvironmentSaysOtherwise(t 
 	t.Setenv(StateRootEnv, chosen)
 	if root := StateRoot(); root != chosen {
 		t.Errorf("StateRoot() = %q, want the environment's %q", root, chosen)
+	}
+}
+
+func TestOneListingIsBounded(t *testing.T) {
+	limit := DefaultLimits().MaxEntries
+
+	t.Run("a root exactly at the bound is enumerated", func(t *testing.T) {
+		root := stateRoot(t)
+		fill(t, root, limit)
+		entries, err := Scan(root, time.Now())
+		if err != nil {
+			t.Fatalf("Scan = %v, want nil at exactly %d entries", err, limit)
+		}
+		if len(entries) != limit {
+			t.Errorf("Scan returned %d entries, want %d", len(entries), limit)
+		}
+	})
+
+	t.Run("a root past the bound is refused, not enumerated", func(t *testing.T) {
+		root := stateRoot(t)
+		fill(t, root, limit+1)
+		entries, err := Scan(root, time.Now())
+		if !apperr.IsKind(err, apperr.KindLimitExceeded) {
+			t.Fatalf("Scan = %v, want a limit-exceeded refusal", err)
+		}
+		if entries != nil {
+			t.Errorf("a refused listing returned %d entries, want none", len(entries))
+		}
+		if !strings.Contains(err.Error(), strconv.Itoa(limit)) {
+			t.Errorf("the refusal %q does not name the bound %d", err, limit)
+		}
+	})
+}
+
+func fill(t *testing.T, root string, count int) {
+	t.Helper()
+	for i := range count {
+		name := filepath.Join(root, "entry-"+strconv.Itoa(i))
+		if err := os.WriteFile(name, nil, 0o600); err != nil {
+			t.Fatalf("WriteFile(%s) = %v, want nil", name, err)
+		}
 	}
 }

@@ -3,8 +3,8 @@ package recovery
 import (
 	"strings"
 
-	"github.com/netforge/netforge/internal/investigator"
-	"github.com/netforge/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/investigator"
+	"github.com/codingseeker/netforge/internal/probe"
 )
 
 func Propose(report investigator.Report) Recommendation {

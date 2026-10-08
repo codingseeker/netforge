@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/netforge/netforge/internal/namespace"
+	"github.com/codingseeker/netforge/internal/namespace"
 )
 
 const (
@@ -20,6 +20,7 @@ const (
 	ipPath          = "ip"
 	prefixClient    = "cl"
 	prefixServer    = "sv"
+	prefixBalancer  = "lb"
 	prefixRouterEnd = "rt"
 )
 
@@ -96,16 +97,22 @@ func SideName(kind string, index int) string {
 		return fmt.Sprintf("nfc%d", index)
 	case prefixServer:
 		return fmt.Sprintf("nfs%d", index)
+	case prefixBalancer:
+		return fmt.Sprintf("nflb%d", index)
 	default:
 		return fmt.Sprintf("nfx%d", index)
 	}
 }
 
 func RouterName(kind string, index int) string {
-	if kind == prefixServer {
+	switch kind {
+	case prefixServer:
 		return fmt.Sprintf("nfr-s%d", index)
+	case prefixBalancer:
+		return fmt.Sprintf("nfr-lb%d", index)
+	default:
+		return fmt.Sprintf("nfr-c%d", index)
 	}
-	return fmt.Sprintf("nfr-c%d", index)
 }
 
 type Address struct {

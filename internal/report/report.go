@@ -6,14 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/netforge/netforge/internal/chaos"
-	"github.com/netforge/netforge/internal/experiment"
-	"github.com/netforge/netforge/internal/investigator"
-	"github.com/netforge/netforge/internal/metrics"
-	"github.com/netforge/netforge/internal/network"
-	"github.com/netforge/netforge/internal/probe"
-	"github.com/netforge/netforge/internal/recovery"
-	"github.com/netforge/netforge/internal/router"
+	"github.com/codingseeker/netforge/internal/chaos"
+	"github.com/codingseeker/netforge/internal/experiment"
+	"github.com/codingseeker/netforge/internal/investigator"
+	"github.com/codingseeker/netforge/internal/metrics"
+	"github.com/codingseeker/netforge/internal/network"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/recovery"
+	"github.com/codingseeker/netforge/internal/router"
 )
 
 type Report struct {
@@ -38,9 +38,13 @@ type Report struct {
 
 	Diagnosis Diagnosis `json:"diagnosis"`
 
+	Recommendation Recommendation `json:"recommendation"`
+
 	Recoveries []Recovery `json:"recoveries,omitempty"`
 
 	Metrics metrics.Metrics `json:"metrics"`
+
+	Transport *probe.TransportLimits `json:"transport,omitempty"`
 
 	Baseline []probe.Measurement `json:"baseline"`
 	Observed []probe.Measurement `json:"observed"`
@@ -64,9 +68,30 @@ type Laboratory struct {
 
 	Services []LaboratoryService `json:"services,omitempty"`
 
-	Router *router.Stats `json:"router,omitempty"`
+	Router   *router.Stats `json:"router,omitempty"`
+	Balancer *Balancer     `json:"balancer,omitempty"`
 
 	RouterError string `json:"router_error,omitempty"`
+}
+
+type Balancer struct {
+	Namespace string            `json:"namespace"`
+	Listen    string            `json:"listen"`
+	Policy    string            `json:"policy"`
+	Backends  []BalancerBackend `json:"backends,omitempty"`
+	Served    int               `json:"served"`
+	Refused   int               `json:"refused"`
+	Healthy   int               `json:"healthy"`
+}
+
+type BalancerBackend struct {
+	Address    string `json:"address"`
+	State      string `json:"state"`
+	Accepted   int    `json:"accepted"`
+	Forwarded  int    `json:"forwarded_bytes"`
+	Checks     int    `json:"checks"`
+	Failed     int    `json:"failed_checks"`
+	Recoveries int    `json:"recoveries"`
 }
 
 type LaboratoryNode struct {
@@ -136,22 +161,47 @@ type Recovery struct {
 	Error string `json:"error,omitempty"`
 }
 
+type Recommendation struct {
+	Diagnosed bool `json:"diagnosed"`
+
+	Action string `json:"action,omitempty"`
+
+	Target string `json:"target,omitempty"`
+
+	From string `json:"from,omitempty"`
+
+	Reason string `json:"reason,omitempty"`
+
+	Evidence string `json:"evidence,omitempty"`
+
+	Flag string `json:"flag,omitempty"`
+
+	Statement string `json:"statement"`
+}
+
+const noDiagnosis = "nothing was diagnosed, so there is nothing to recommend"
+
+const noRepair = "a failure was diagnosed but the evidence names no authorized repair, " +
+	"so there is nothing to recommend"
+
 func FromExperiment(run experiment.Report, laboratory *network.Summary) Report {
 	out := Report{
-		Name:         run.Name,
-		ExperimentID: run.ExperimentID,
-		Seed:         run.Seed,
-		Succeeded:    run.Succeeded(),
-		Failed:       string(run.Failed),
-		Error:        messageOf(run.Err),
-		CleanedUp:    run.CleanedUp,
-		Duration:     run.Duration.String(),
-		Laboratory:   laboratoryOf(laboratory),
-		Diagnosis:    diagnosisOf(run.Diagnosis),
-		Metrics:      metrics.FromReport(run),
-		Baseline:     run.Baseline,
-		Observed:     run.Observed,
-		Verified:     run.Verified,
+		Name:           run.Name,
+		ExperimentID:   run.ExperimentID,
+		Seed:           run.Seed,
+		Succeeded:      run.Succeeded(),
+		Failed:         string(run.Failed),
+		Error:          messageOf(run.Err),
+		CleanedUp:      run.CleanedUp,
+		Duration:       run.Duration.String(),
+		Laboratory:     laboratoryOf(laboratory),
+		Transport:      transportOf(run.Observed),
+		Diagnosis:      diagnosisOf(run.Diagnosis),
+		Recommendation: recommendationOf(run, observationFrom(run, laboratory)),
+		Metrics:        metrics.FromReport(run),
+		Baseline:       run.Baseline,
+		Observed:       run.Observed,
+		Verified:       run.Verified,
 	}
 	for _, step := range run.Steps {
 		out.Steps = append(out.Steps, Step{
@@ -237,6 +287,15 @@ func EncodeText(w io.Writer, run experiment.Report, laboratory *network.Summary)
 		return err
 	}
 
+	if err := writeRecommendation(w, report.Recommendation); err != nil {
+		return err
+	}
+
+	if report.Transport != nil {
+		if err := writeTransportLimits(w, report.Transport); err != nil {
+			return err
+		}
+	}
 	if err := writeLine(w, "\nmetrics:\n"); err != nil {
 		return err
 	}
@@ -283,7 +342,7 @@ func writeLaboratory(w io.Writer, lab *Laboratory) error {
 			return err
 		}
 		for _, node := range lab.Nodes {
-			line := "    " + pad(node.Namespace, 24) + pad(node.Role, 8) + node.Address
+			line := "    " + pad(node.Namespace, 24) + pad(node.Role, 10) + node.Address
 			if node.Gateway != "" {
 				line += " via " + node.Gateway
 			}
@@ -313,6 +372,11 @@ func writeLaboratory(w io.Writer, lab *Laboratory) error {
 			}
 		}
 	}
+	if lab.Balancer != nil {
+		if err := writeBalancer(w, lab.Balancer); err != nil {
+			return err
+		}
+	}
 	if lab.Router == nil {
 		if lab.RouterError != "" {
 			return writeLine(w, "  router:     counters not read: %s\n", lab.RouterError)
@@ -321,6 +385,9 @@ func writeLaboratory(w io.Writer, lab *Laboratory) error {
 	}
 
 	stats := lab.Router
+	if stats == nil {
+		return nil
+	}
 	return writeLine(w, "  router:\n"+
 		"    received %d, forwarded %d, bytes %d\n"+
 		"    ignored %d, local %d, malformed %d, no route %d\n"+
@@ -332,6 +399,63 @@ func writeLaboratory(w io.Writer, lab *Laboratory) error {
 		stats.TTLExceeded, stats.Oversize, stats.Unreachable,
 		stats.ARPRequests, stats.ARPReplies, stats.Unresolved,
 		stats.QueueDepth, stats.QueueSize, stats.Routes, stats.Neighbors, stats.SendErrors)
+}
+
+func writeRecommendation(w io.Writer, recommendation Recommendation) error {
+	if err := writeLine(w, "\nrecommendation:\n"); err != nil {
+		return err
+	}
+	if err := writeLine(w, "  diagnosed: %t\n", recommendation.Diagnosed); err != nil {
+		return err
+	}
+	if err := writeLine(w, "  %s\n", recommendation.Statement); err != nil {
+		return err
+	}
+	if recommendation.Action == "" {
+		return nil
+	}
+	if err := writeLine(w, "  next:      %s\n", recommendation.Flag); err != nil {
+		return err
+	}
+	if recommendation.From == "" {
+		return nil
+	}
+	return writeLine(w, "  from:      %s\n", recommendation.From)
+}
+
+func writeBalancer(w io.Writer, balancer *Balancer) error {
+	if err := writeLine(w, "  balancer:\n"); err != nil {
+		return err
+	}
+	for _, line := range []string{
+		"    namespace: " + balancer.Namespace,
+		"    listen:    " + balancer.Listen,
+		"    policy:    " + balancer.Policy,
+		"    served:    " + itoa(int64(balancer.Served)) +
+			", refused: " + itoa(int64(balancer.Refused)) +
+			", healthy: " + itoa(int64(balancer.Healthy)),
+	} {
+		if err := writeLine(w, "%s\n", line); err != nil {
+			return err
+		}
+	}
+	for _, backend := range balancer.Backends {
+		if err := writeLine(w, "    %-22s %-10s accepted %d, forwarded %d, checks %d, failed %d\n",
+			backend.Address, backend.State, backend.Accepted, backend.Forwarded,
+			backend.Checks, backend.Failed); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func transportOf(measurements []probe.Measurement) *probe.TransportLimits {
+	for _, measurement := range measurements {
+		if measurement.Transport != nil {
+			return measurement.Transport
+		}
+	}
+	return nil
 }
 
 func laboratoryOf(summary *network.Summary) *Laboratory {
@@ -347,6 +471,7 @@ func laboratoryOf(summary *network.Summary) *Laboratory {
 		RouterLinks:      summary.RouterLinks,
 		Router:           summary.Router,
 		RouterError:      summary.RouterError,
+		Balancer:         balancerOf(summary.Balancer),
 	}
 	for _, node := range summary.Nodes {
 		lab.Nodes = append(lab.Nodes, LaboratoryNode{
@@ -365,6 +490,32 @@ func laboratoryOf(summary *network.Summary) *Laboratory {
 	return &lab
 }
 
+func balancerOf(summary *network.BalancerSummary) *Balancer {
+	if summary == nil {
+		return nil
+	}
+	balancer := &Balancer{
+		Namespace: summary.Namespace,
+		Listen:    summary.Listen,
+		Policy:    summary.Policy,
+		Served:    summary.Served,
+		Refused:   summary.Refused,
+		Healthy:   summary.Healthy,
+	}
+	for _, backend := range summary.Backends {
+		balancer.Backends = append(balancer.Backends, BalancerBackend{
+			Address:    backend.Address,
+			State:      backend.State,
+			Accepted:   backend.Accepted,
+			Forwarded:  backend.Forwarded,
+			Checks:     backend.Checks,
+			Failed:     backend.Failed,
+			Recoveries: backend.Recoveries,
+		})
+	}
+	return balancer
+}
+
 func pad(value string, width int) string {
 	for len(value) < width {
 		value += " "
@@ -380,6 +531,44 @@ func diagnosisOf(investigation investigator.Report) Diagnosis {
 		Rule:           investigation.Rule,
 		Evidence:       len(investigation.Evidence),
 		ProbesRun:      investigation.ProbesRun,
+	}
+}
+
+func observationFrom(run experiment.Report, laboratory *network.Summary) string {
+	for _, measurement := range run.Observed {
+		if measurement.Namespace != "" {
+			return measurement.Namespace
+		}
+	}
+	if laboratory != nil {
+		for _, node := range laboratory.Nodes {
+			if node.Namespace != "" && node.Role == string(network.RoleClient) {
+				return node.Namespace
+			}
+		}
+	}
+	return ""
+}
+
+func recommendationOf(run experiment.Report, from string) Recommendation {
+	proposed := run.Recommendation
+	diagnosed := run.Diagnosis.Diagnosis != "" && run.Diagnosis.Diagnosis != investigator.Unknown
+	if proposed.Action == "" {
+		statement := noDiagnosis
+		if diagnosed {
+			statement = noRepair
+		}
+		return Recommendation{Diagnosed: diagnosed, Statement: statement}
+	}
+	return Recommendation{
+		Diagnosed: true,
+		Action:    proposed.Action.String(),
+		Target:    proposed.Target,
+		From:      from,
+		Reason:    proposed.Reason,
+		Evidence:  proposed.Evidence,
+		Flag:      "-recover " + proposed.Action.String() + ":" + proposed.Target,
+		Statement: proposed.Describe(),
 	}
 }
 
@@ -424,4 +613,10 @@ func textTime(at time.Time) string {
 func writeLine(w io.Writer, format string, args ...any) error {
 	_, err := io.WriteString(w, sprintf(format, args...))
 	return err
+}
+
+func writeTransportLimits(w io.Writer, limits *probe.TransportLimits) error {
+	return writeLine(w, "  transport: reliable udp, max payload %d, window %d, connections %d, idle timeout %s\n",
+		limits.MaxPayload, limits.MaxWindow, limits.MaxConnections,
+		time.Duration(limits.IdleTimeout))
 }

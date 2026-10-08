@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/probe"
 )
 
 type Limits struct {
@@ -343,6 +343,8 @@ func chain(failed probe.Protocol) []probe.Protocol {
 		return []probe.Protocol{probe.ProtocolICMP, probe.ProtocolTCP}
 	case probe.ProtocolUDP:
 		return []probe.Protocol{probe.ProtocolICMP, probe.ProtocolUDP}
+	case probe.ProtocolRUDP:
+		return []probe.Protocol{probe.ProtocolICMP, probe.ProtocolRUDP}
 	case probe.ProtocolDNS:
 
 		return []probe.Protocol{probe.ProtocolICMP, probe.ProtocolDNS}

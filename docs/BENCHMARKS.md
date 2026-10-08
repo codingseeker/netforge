@@ -21,7 +21,7 @@ of the proxy.
 - go1.25.12 X:nodwarf5, linux/amd64
 - kernel 6.19.13-200.fc43.x86_64
 - 12 CPUs, 13th Gen Intel(R) Core(TM) i5-1334U
-- revision unknown: built outside a version control checkout
+- revision unknown: the toolchain stamps no VCS revision into a test binary
 
 ## Configuration
 
@@ -40,24 +40,24 @@ intact. Loss is the share of the offered payload that never came back.
 
 | Condition | Transport | Throughput | Goodput | Loss | Mean RTT | Retransmits | Complete |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | :---: |
-| 0% loss | rudp | 15356101 B/s | 15356101 B/s | 0.0% | 1.94 ms | 0 | true |
-| 0% loss | tcp | 38584634 B/s | 38584634 B/s | 0.0% | 0.08 ms | 0 | true |
-| 0% loss | udp | 643494 B/s | 590707 B/s | 8.2% | 1.17 ms | 0 | false |
-| 1% loss | rudp | 806937 B/s | 806937 B/s | 0.0% | 29.85 ms | 67 | true |
-| 1% loss | tcp | 33305044 B/s | 33305044 B/s | 0.0% | 0.26 ms | 0 | true |
-| 1% loss | udp | 643153 B/s | 640641 B/s | 0.4% | 0.10 ms | 0 | false |
-| 5% loss | rudp | 196965 B/s | 196965 B/s | 0.0% | 39.57 ms | 86 | true |
-| 5% loss | tcp | 26159465 B/s | 26159465 B/s | 0.0% | 1.23 ms | 0 | true |
-| 5% loss | udp | 646218 B/s | 618450 B/s | 4.3% | 0.07 ms | 0 | false |
-| 10% loss | rudp | 212404 B/s | 212404 B/s | 0.0% | 48.12 ms | 106 | true |
-| 10% loss | tcp | 607640 B/s | 607640 B/s | 0.0% | 205.70 ms | 0 | true |
-| 10% loss | udp | 654235 B/s | 0 B/s | 100.0% | 0.00 ms | 0 | false |
-| high latency | rudp | 425282 B/s | 425282 B/s | 0.0% | 63.98 ms | 0 | true |
-| high latency | tcp | 866658 B/s | 866658 B/s | 0.0% | 154.85 ms | 0 | true |
-| high latency | udp | 500462 B/s | 179854 B/s | 64.1% | 119.84 ms | 0 | false |
-| high jitter | rudp | 423566 B/s | 423566 B/s | 0.0% | 63.26 ms | 0 | true |
-| high jitter | tcp | 378543 B/s | 378543 B/s | 0.0% | 240.28 ms | 0 | true |
-| high jitter | udp | 494105 B/s | 177569 B/s | 64.1% | 98.83 ms | 0 | false |
+| 0% loss | rudp | 17659930 B/s | 17659930 B/s | 0.0% | 1.78 ms | 0 | true |
+| 0% loss | tcp | 42050690 B/s | 42050690 B/s | 0.0% | 0.09 ms | 0 | true |
+| 0% loss | udp | 63627184 B/s | 63627184 B/s | 0.0% | 0.08 ms | 0 | true |
+| 1% loss | rudp | 614136 B/s | 614136 B/s | 0.0% | 32.81 ms | 74 | true |
+| 1% loss | tcp | 31856119 B/s | 31856119 B/s | 0.0% | 0.14 ms | 0 | true |
+| 1% loss | udp | 646581 B/s | 641530 B/s | 0.8% | 0.04 ms | 0 | false |
+| 5% loss | rudp | 227705 B/s | 227705 B/s | 0.0% | 52.24 ms | 91 | true |
+| 5% loss | tcp | 43567226 B/s | 43567226 B/s | 0.0% | 0.14 ms | 0 | true |
+| 5% loss | udp | 646195 B/s | 620953 B/s | 3.9% | 0.06 ms | 0 | false |
+| 10% loss | rudp | 211957 B/s | 211957 B/s | 0.0% | 34.68 ms | 74 | true |
+| 10% loss | tcp | 1225029 B/s | 1225029 B/s | 0.0% | 83.44 ms | 0 | true |
+| 10% loss | udp | 648918 B/s | 570338 B/s | 12.1% | 0.47 ms | 0 | false |
+| high latency | rudp | 430347 B/s | 430347 B/s | 0.0% | 63.01 ms | 0 | true |
+| high latency | tcp | 724619 B/s | 724619 B/s | 0.0% | 184.51 ms | 0 | true |
+| high latency | udp | 500928 B/s | 180021 B/s | 64.1% | 120.20 ms | 0 | false |
+| high jitter | rudp | 444299 B/s | 444299 B/s | 0.0% | 62.90 ms | 0 | true |
+| high jitter | tcp | 159990 B/s | 159990 B/s | 0.0% | 502.56 ms | 0 | true |
+| high jitter | udp | 516577 B/s | 185645 B/s | 64.1% | 75.99 ms | 0 | false |
 
 ## What each scenario is for
 

@@ -1,4 +1,4 @@
-module github.com/netforge/netforge
+module github.com/codingseeker/netforge
 
 go 1.25
 

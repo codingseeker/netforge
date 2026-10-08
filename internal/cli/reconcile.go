@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/reconcile"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/logging"
+	"github.com/codingseeker/netforge/internal/reconcile"
 )
 
 type reconcileOptions struct {
@@ -182,7 +183,7 @@ func reconcileReclaim() *Command {
 			if err := writeReclaim(session.Env.stdout(), report); err != nil {
 				return err
 			}
-			session.Logger.Info("state reconciled",
+			session.Logger.Info(logging.EventStateReconciled,
 				"removed", len(report.Names()),
 				"refused", report.Refused,
 				"reason", report.Reason)

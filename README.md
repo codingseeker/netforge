@@ -9,9 +9,9 @@ verifies the recovery. It is a networking and systems engineering project.
 
 ## Status
 
-**Phases 0 to 13 are implemented.** Every command below exists and is tested
-against real namespaces, real routes and real faults. The state of each area is
-in the table below; nothing in it is claimed beyond what the suite in this
+**Every command documented below is implemented and is tested against real
+namespaces, real routes and real faults.** The state of each area is in the table
+below; nothing in it is claimed beyond what the suite in this
 repository demonstrates.
 
 | Area | State |
@@ -39,14 +39,30 @@ repository demonstrates.
 | Crash reconciliation | `internal/reconcile`, `netforge reconcile list\|reclaim`: state a `SIGKILL`ed run left, identified by a marker, reclaimed only with an authorization and a reason |
 | Security audit | `tests/security`: configuration, resource, injection, packet, timeout and repository-invariant audits |
 | Reliability audit | `tests/integration`: repeated build and teardown, per-resource leak checks, interruption and recovery, and the assertion that no laboratory process outlives its run |
-| Milestone reports | `docs/MILESTONES.md`, with each milestone's gates and the definition of done item by item |
-| Documentation | `docs/`: architecture, protocol, network model, experiments, configuration, operations, performance, security, threat model, milestones |
+| Documentation | `docs/`: architecture, protocol, network model, experiments, configuration, operations, performance, security, threat model |
 
 Claims in this document describe only what the code and the test suite in this
 repository demonstrate. NetForge is not described as production-ready or secure;
 see [docs/SECURITY.md](docs/SECURITY.md) for the security posture that is
 actually implemented and [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for the
 threats that are in scope.
+
+## Install
+
+From a clone:
+
+```console
+$ git clone https://github.com/codingseeker/netforge
+$ cd netforge
+$ make build          # produces bin/netforge
+```
+
+Building from a clone needs nothing beyond the Go toolchain. Once a release tag
+exists, `go install github.com/codingseeker/netforge/cmd/netforge@v1.0.0`
+installs the same binary; `@latest` resolves to a published tag, so it does not
+work until then.
+
+Running NetForge needs the platform tools listed under Requirements below.
 
 ## Requirements
 
@@ -57,8 +73,8 @@ threats that are in scope.
   capabilities that come with it are confined to the namespaces NetForge owns.
 - `ip` and `tc` must be on `PATH`; `tc` comes with `iproute2`. NetForge drives
   them as bare names resolved through a fixed `PATH`, never through a shell.
-- `ping` must be on `PATH` for the ICMP measurement. The five agent protocols
-  (TCP, UDP, DNS, TLS, HTTP) do not need it.
+- `ping` must be on `PATH` for the ICMP measurement. The six agent protocols
+  (TCP, UDP, RUDP, DNS, TLS, HTTP) do not need it.
 - Without unprivileged user namespaces the network suites skip and the rest of
   the suite still runs.
 
@@ -161,18 +177,21 @@ Command flags:
 | `experiment plan`, `experiment run` | `--namespace` | laboratory namespace the experiment measures from |
 | | `--target` | address the experiment observes |
 | | `--port` | port measured, for the protocols that use one |
-| | `--protocol` | `icmp`, `tcp`, `udp`, `dns`, `tls` or `http` |
+| | `--protocol` | `icmp`, `tcp`, `udp`, `rudp`, `dns`, `tls` or `http` |
 | | `--count`, `--size` | probes per measurement, payload bytes per probe |
 | | `--timeout`, `--deadline` | how long one probe waits, how long one measurement takes |
 | | `--after-fault`, `--settle` | how long a fault is given to reach the kernel, how long a change is given to take effect |
-| | `-recover` | a recovery action as `action:target`; may be repeated |
-| | `-authorize`, `-why` | the consent and the reason a recovery requires |
+| | `--recover` | a recovery action as `action:target`; may be repeated |
+| | `--recover-from` | the namespace an address recovery is verified from; defaults to `--namespace` |
+| | `--authorize`, `--why` | the consent and the reason a recovery requires |
 | `experiment run` | `--output` | `text` or `json` |
 | | `--clients`, `--servers` | nodes the laboratory creates, 1 to 8 each |
 | | `--id` | laboratory identifier; its namespaces are `nf-<role>-<id>` |
 | | `--routing` | `kernel` or `software`: who forwards in the router namespace |
 | | `--service-ports` | server namespaces that serve the observation's endpoint, 0 for none |
 | | `--service-base-port` | the first port a serving namespace binds; the *i*-th binds base+*i* |
+| | `--balancer` | put a load balancer in front of that many servers; 0 for none |
+| | `--balancer-base-port` | the port the balancer binds, and the base its backends bind from |
 | `reconcile list` | `--state-root` | the state directory to list; default `$NETFORGE_STATE_ROOT` or the system temporary directory |
 | `reconcile reclaim` | `--id` | a state directory to reclaim; may be repeated |
 | | `--authorize`, `-why` | the consent and the reason a reclaim requires |
@@ -183,16 +202,21 @@ Examples:
 ```console
 $ netforge config validate examples/simple-line/experiment.yaml
 configuration: simple-line
-experiment_id: nf-simple-line-391328ec
-scope.network: 10.42.0.0/16
-scope.namespaces: client,router,server
+experiment_id: nf-simple-line-9c318caa
+scope.network: 10.42.0.0/24
+scope.namespaces: nf-client0-demo,nf-server0-demo,nf-router-demo
 
 $ netforge config show examples/simple-line/experiment.yaml
 $ cat examples/simple-line/experiment.yaml | netforge config validate -
 $ netforge config validate --show-effective examples/simple-line/experiment.yaml
 $ netforge limits show
 $ netforge experiment plan --namespace nf-client0-demo --target 10.42.0.6 \
-    --protocol icmp experiment.yaml
+    --protocol icmp examples/simple-line/experiment.yaml
+$ netforge experiment run --id demo --namespace nf-client0-demo \
+    --target 10.42.0.6 --protocol icmp \
+    --recover remove_fault:nf-server0-demo --authorize \
+    --why "the example removes the loss its own document declared" \
+    examples/simple-line/experiment.yaml
 $ netforge recovery actions
 $ netforge reconcile list
 $ NETFORGE_LOG_FORMAT=json netforge config validate examples/simple-line/experiment.yaml
@@ -323,14 +347,16 @@ Run `netforge limits show` for the values compiled into the binary.
 netforge/
 ├── cmd/netforge/         process entry point: signals and exit status only
 ├── internal/apperr/      application error model
+├── internal/chaos/       fault specifications and the tc engine that applies them
 ├── internal/cleanup/     ordered, idempotent cleanup stack
 ├── internal/cli/         command parsing, dispatch, help, exit codes, signals
 ├── internal/config/      configuration model, strict YAML, validation
 ├── internal/iface/       veth, address and route operations
-├── internal/logging/     structured logging
+├── internal/logging/     structured logging and the closed event vocabulary
 ├── internal/namespace/   namespace lifecycle and the laboratory agent
 ├── internal/network/     topology planning, scope, lifetime, routes
 ├── internal/packet/      Ethernet, IPv4, ICMP, UDP, TCP and DNS codecs
+├── internal/reconcile/   state a killed run left, identified and reclaimed
 ├── internal/router/      routing table, ARP, forwarding, counters, statistics
 ├── internal/transport/   reliable UDP: windows, retransmission, congestion control
 ├── internal/loadbalancer/ backends, health, policies, draining
@@ -350,17 +376,6 @@ netforge/
 └── Makefile
 ```
 
-A package is created when the phase that needs it starts, not before, so that no
-empty package exists. `internal/packet` is the addition required by Phase 1;
-`internal/iface`, `internal/namespace` and `internal/network` by Phase 2;
-`internal/router` by Phase 3; `internal/chaos`, `internal/probe`,
-`internal/service` and `internal/investigator` by Phases 4 to 6;
-`internal/transport` by Phase 7; `internal/loadbalancer` by Phase 8;
-`internal/experiment` and `internal/recovery` by Phases 9 and 10; and
-`internal/metrics` and `internal/report` by Phase 11. Phase 13 added no package:
-it wrote the four documents section 18 required and corrected the ones that had
-drifted.
-
 Architecture invariants are listed in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -376,11 +391,22 @@ Architecture invariants are listed in
 - [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md)
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
-- [docs/MILESTONES.md](docs/MILESTONES.md)
 - [examples/README.md](examples/README.md)
 
 ## Development rules
 
-The engineering rules for this repository, including stop-on-failure, the
-evidence requirement and the rule against mocks at the Linux networking
-boundary, are in [todo.md](todo.md). They apply to every phase.
+Three rules govern this repository and are what the suite enforces rather than
+documents:
+
+- **Evidence, not assertion.** A capability is claimed only where a named test
+  demonstrates it against the real thing — real namespaces, real routes, real
+  faults — never against a mock at the Linux networking boundary. `make check`
+  is the gate: `fmt-check`, `vet`, the suite, the race detector, coverage and
+  the build.
+- **Stop on failure.** A failing gate ends the change. A test that cannot run is
+  a skip only when the *host* is the reason (running as root, unprivileged user
+  namespaces unavailable); a test that skips because the product failed to do
+  what it claims is a defect in the test.
+- **Bounded everything.** Every limit is declared, defaulted, ceiling-checked
+  and read by the code that enforces it. `tests/security` fails the build if a
+  read is unbounded or a capability is claimed without an executor.

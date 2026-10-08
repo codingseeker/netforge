@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -214,4 +215,46 @@ func TestDefaultFormatIsText(t *testing.T) {
 	if !strings.Contains(out, "event=event") {
 		t.Fatalf("output %q is missing the event field", out)
 	}
+}
+
+func TestARecordCarriesExactlyOneEventKey(t *testing.T) {
+	logger, buf := newTestLogger(t, Options{Level: slog.LevelInfo, Format: FormatJSON})
+	logger.Info("command dispatch",
+		slog.String(FieldEvent, "dispatch"),
+		slog.String("component", "experiment"))
+
+	if got := strings.Count(buf.String(), `"event":`); got != 1 {
+		t.Fatalf("the record carries %d event keys, want exactly one: %s", got, buf.String())
+	}
+
+	var record map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &record); err != nil {
+		t.Fatalf("Unmarshal(%q) = %v, want valid JSON", buf.String(), err)
+	}
+	if got := record[FieldEvent]; got != "command dispatch" {
+		t.Fatalf("%s = %v, want the message, which is the record's one event name", FieldEvent, got)
+	}
+	if got := record[FieldComponent]; got != "experiment" {
+		t.Fatalf("%s = %v, want experiment", FieldComponent, got)
+	}
+}
+
+func TestATextRecordCarriesExactlyOneEventKey(t *testing.T) {
+	logger, buf := newTestLogger(t, Options{Level: slog.LevelInfo, Format: FormatText})
+	logger.Info("command dispatch", slog.String(FieldEvent, "dispatch"))
+
+	out := buf.String()
+	if got := strings.Count(out, "event="); got != 1 {
+		t.Fatalf("the record carries %d event keys, want exactly one: %s", got, out)
+	}
+	if !strings.Contains(out, "event="+quoteIfNeeded("command dispatch")) {
+		t.Fatalf("output %q does not carry the message as the event name", out)
+	}
+}
+
+func quoteIfNeeded(value string) string {
+	if strings.ContainsAny(value, " \t") {
+		return strconv.Quote(value)
+	}
+	return value
 }

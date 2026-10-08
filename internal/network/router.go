@@ -9,10 +9,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/namespace"
-	"github.com/netforge/netforge/internal/reconcile"
-	"github.com/netforge/netforge/internal/router"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/namespace"
+	"github.com/codingseeker/netforge/internal/reconcile"
+	"github.com/codingseeker/netforge/internal/router"
 )
 
 const (

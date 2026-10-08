@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/reconcile"
+	"github.com/codingseeker/netforge/internal/reconcile"
 )
 
 func phase15Root(t *testing.T) string {

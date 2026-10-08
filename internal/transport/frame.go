@@ -3,7 +3,7 @@ package transport
 import (
 	"encoding/binary"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 const (

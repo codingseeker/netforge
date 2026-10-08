@@ -10,10 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/netforge/netforge/internal/namespace"
-	"github.com/netforge/netforge/internal/probe"
-	"github.com/netforge/netforge/internal/router"
-	"github.com/netforge/netforge/internal/service"
+	"github.com/codingseeker/netforge/internal/loadbalancer"
+	"github.com/codingseeker/netforge/internal/namespace"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/router"
+	"github.com/codingseeker/netforge/internal/service"
 )
 
 var (
@@ -40,6 +41,9 @@ func TestMain(m *testing.M) {
 	if handled, code := probe.Dispatch(os.Args[1:]); handled {
 		os.Exit(code)
 	}
+	if handled, code := loadbalancer.Dispatch(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 
 	root, err := findRepoRoot()
 	if err != nil {
@@ -59,10 +63,15 @@ func TestMain(m *testing.M) {
 }
 
 func benchmarkChild() bool {
-	const child = "-test.run=^TestTransportBenchmarkChild$"
+	children := []string{
+		"-test.run=^TestTransportBenchmarkChild$",
+		"-test.run=^TestPhase16BalancerClient$",
+	}
 	for _, arg := range os.Args[1:] {
-		if arg == child {
-			return true
+		for _, child := range children {
+			if arg == child {
+				return true
+			}
 		}
 	}
 	return false

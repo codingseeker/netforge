@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 func controlConfig(t *testing.T, backend string) (Config, string) {

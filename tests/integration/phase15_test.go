@@ -1,16 +1,15 @@
 package integration
 
 import (
-	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/netforge/netforge/internal/namespace"
+	"github.com/codingseeker/netforge/internal/logging"
+	"github.com/codingseeker/netforge/internal/namespace"
 )
 
 const (
@@ -95,16 +94,7 @@ func TestAKilledRunLeavesIdentifiableState(t *testing.T) {
 		t.Fatalf("the state root was not empty at the start:\n%s", before.stdout)
 	}
 
-	command, _, _ := phase15KilledRun(root, document)
-	if err := command.Start(); err != nil {
-		t.Fatalf("start the killed run: %v", err)
-	}
-	time.Sleep(1200 * time.Millisecond)
-	if err := command.Process.Kill(); err != nil {
-		_ = command.Wait()
-		t.Fatalf("the run finished before the kill could land: %v", err)
-	}
-	_ = command.Wait()
+	phase15KilledRun(t, root, document)
 
 	listing := phase15List(t, root)
 	entries := phase15Entries(listing.stdout)
@@ -140,16 +130,7 @@ func TestAKilledRunLeavesIdentifiableState(t *testing.T) {
 func TestReclaimingWhatAKilledRunLeftIsBoundedReportedAndIdempotent(t *testing.T) {
 	root := t.TempDir()
 	document := phase15Document(t)
-	command, _, _ := phase15KilledRun(root, document)
-	if err := command.Start(); err != nil {
-		t.Fatalf("start the killed run: %v", err)
-	}
-	time.Sleep(1200 * time.Millisecond)
-	if err := command.Process.Kill(); err != nil {
-		_ = command.Wait()
-		t.Fatalf("the run finished before the kill could land: %v", err)
-	}
-	_ = command.Wait()
+	phase15KilledRun(t, root, document)
 
 	names := phase15Names(t, root)
 	if len(names) == 0 {
@@ -190,16 +171,7 @@ func TestTheReconcilerWillNotTouchAStateRootItWasNotGiven(t *testing.T) {
 	ours := t.TempDir()
 	theirs := t.TempDir()
 	document := phase15Document(t)
-	command, _, _ := phase15KilledRun(ours, document)
-	if err := command.Start(); err != nil {
-		t.Fatalf("start the killed run: %v", err)
-	}
-	time.Sleep(1200 * time.Millisecond)
-	if err := command.Process.Kill(); err != nil {
-		_ = command.Wait()
-		t.Fatalf("the run finished before the kill could land: %v", err)
-	}
-	_ = command.Wait()
+	phase15KilledRun(t, ours, document)
 
 	names := phase15Names(t, ours)
 	if len(names) == 0 {
@@ -239,16 +211,8 @@ func TestTheReconcilerWillNotTouchAStateRootItWasNotGiven(t *testing.T) {
 func TestAReconcileNeedsAuthorizationAndAReason(t *testing.T) {
 	root := t.TempDir()
 	document := phase15Document(t)
-	command, _, _ := phase15KilledRun(root, document)
-	if err := command.Start(); err != nil {
-		t.Fatalf("start the killed run: %v", err)
-	}
-	time.Sleep(1200 * time.Millisecond)
-	if err := command.Process.Kill(); err != nil {
-		_ = command.Wait()
-		t.Fatalf("the run finished before the kill could land: %v", err)
-	}
-	_ = command.Wait()
+	phase15KilledRun(t, root, document)
+
 	names := phase15Names(t, root)
 	if len(names) == 0 {
 		t.Fatal("the killed run left nothing to reclaim")
@@ -297,24 +261,18 @@ func TestAReconcileRefusesStateThatIsStillInUse(t *testing.T) {
 
 	root := t.TempDir()
 	document := phase15Document(t)
-	command, stdout, _ := phase15LongRun(root, document)
-	if err := command.Start(); err != nil {
-		t.Fatalf("start the live run: %v", err)
+	command, errOut := phase15Start(t, root, document, phase15LongRunFlags()...)
+
+	phase15Record := awaitRecord(t, errOut, logging.EventStageSetup)
+	if phase15Record.text("experiment_id") == "" {
+		t.Fatalf("the %s record carries no experiment identifier: %v", logging.EventStageSetup, phase15Record)
 	}
 
-	_ = stdout
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if len(phase15Names(t, root)) > 0 {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
 	names := phase15Names(t, root)
 	if len(names) == 0 {
 		_ = command.Process.Kill()
 		_ = command.Wait()
-		t.Skip("the run did not create its state directory within the deadline")
+		t.Fatalf("a run that finished the setup step created no state directory in %s:\n%s", root, errOut.String())
 	}
 
 	t.Logf("reconciling %d state directories of a run that is still going", len(names))
@@ -338,18 +296,30 @@ func TestAReconcileRefusesStateThatIsStillInUse(t *testing.T) {
 	_ = command.Wait()
 }
 
-func phase15KilledRun(root, document string) (*exec.Cmd, *bytes.Buffer, *bytes.Buffer) {
-	return phase15Command(root, document,
-		"--routing", "software", "--count", "12", "--deadline", "12s")
+func phase15KilledRun(t *testing.T, root, document string) {
+	t.Helper()
+	command, errOut := phase15Start(t, root, document, phase15KilledRunFlags()...)
+	awaitRecord(t, errOut, logging.EventStageSetup)
+	if err := command.Process.Kill(); err != nil {
+		_ = command.Wait()
+		t.Fatalf("the run finished before the kill could land: %v", err)
+	}
+	_ = command.Wait()
 }
 
-func phase15LongRun(root, document string) (*exec.Cmd, *bytes.Buffer, *bytes.Buffer) {
-	return phase15Command(root, document,
-		"--count", "40", "--deadline", "30s", "--timeout", "500ms")
+func phase15KilledRunFlags() []string {
+	return []string{"--routing", "software", "--count", "12", "--deadline", "12s"}
 }
 
-func phase15Command(root, document string, extra ...string) (*exec.Cmd, *bytes.Buffer, *bytes.Buffer) {
+func phase15LongRunFlags() []string {
+	return []string{"--count", "40", "--deadline", "30s", "--timeout", "500ms"}
+}
+
+func phase15Start(t *testing.T, root, document string, extra ...string) (*exec.Cmd, *syncBuffer) {
+	t.Helper()
 	args := append([]string{
+		"--log-level=debug",
+		"--log-format=json",
 		"experiment", "run",
 		"--id", phase15LabID,
 		"--namespace", phase15Client,
@@ -362,11 +332,14 @@ func phase15Command(root, document string, extra ...string) (*exec.Cmd, *bytes.B
 	}, extra...)
 	command := exec.Command(binaryPath, append(args, document)...)
 	command.Stdin = strings.NewReader("")
-	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	command.Stdout, command.Stderr = stdout, stderr
+	errOut := new(syncBuffer)
+	command.Stderr = errOut
 	command.Env = append(os.Environ(), namespace.AgentEnv+"=")
 	command.Env = append(command.Env, "NETFORGE_STATE_ROOT="+root)
-	return command, stdout, stderr
+	if err := command.Start(); err != nil {
+		t.Fatalf("start the run: %v", err)
+	}
+	return command, errOut
 }
 
 func phase15Names(t *testing.T, root string) []string {

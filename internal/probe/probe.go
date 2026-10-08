@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 type Runner interface {
@@ -146,6 +146,13 @@ func DefaultOptions() Options {
 	}
 }
 
+type TransportLimits struct {
+	MaxPayload     int   `json:"max_payload"`
+	MaxWindow      int   `json:"max_window"`
+	MaxConnections int   `json:"max_connections"`
+	IdleTimeout    int64 `json:"idle_timeout_ns"`
+}
+
 type Measurement struct {
 	Target string `json:"target"`
 
@@ -160,6 +167,10 @@ type Measurement struct {
 	AverageRTT   time.Duration `json:"average_rtt"`
 	MaxRTT       time.Duration `json:"max_rtt"`
 	DeviationRTT time.Duration `json:"deviation_rtt"`
+
+	Retransmitted int `json:"retransmitted"`
+
+	Transport *TransportLimits `json:"transport,omitempty"`
 
 	Duplicates int `json:"duplicates"`
 

@@ -150,6 +150,28 @@ func TestProcSysNetPathKeepsTheWholePrefix(t *testing.T) {
 	}
 }
 
+// The agent re-checks the path it is handed rather than trusting that its parent
+// cleaned it. A prefix test alone would accept /proc/sys/net/../../etc/passwd,
+// which resolves outside the network settings the agent is allowed to touch.
+func TestTheAgentRefusesAWriteThatLeavesTheNetworkSettings(t *testing.T) {
+	escapes := []string{
+		"/proc/sys/net/../../../../etc/passwd",
+		"/proc/sys/net/ipv4/../../kernel/core_pattern",
+		"/etc/passwd",
+		"/proc/self/environ",
+	}
+	for _, name := range escapes {
+		reply := write(request{ID: 1, Op: "write", PID: 1,
+			Argv: []string{name, "0"}})
+		if reply.Err == "" {
+			t.Errorf("the agent accepted a write to %q", name)
+		}
+		if reply.Code == 0 {
+			t.Errorf("the agent reported success writing to %q", name)
+		}
+	}
+}
+
 func TestHolderPipesAreHeldNotGarbage(t *testing.T) {
 	read, feed, err := os.Pipe()
 	if err != nil {

@@ -8,7 +8,7 @@ import (
 	"net/netip"
 	"syscall"
 
-	"github.com/netforge/netforge/internal/packet"
+	"github.com/codingseeker/netforge/internal/packet"
 )
 
 const (

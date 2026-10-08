@@ -21,7 +21,7 @@ var packetImportAllowlist = map[string]bool{
 	"strconv":         true,
 	"strings":         true,
 
-	"github.com/netforge/netforge/internal/apperr": true,
+	"github.com/codingseeker/netforge/internal/apperr": true,
 }
 
 func TestPacketLayerImportsOnlyTheAllowlist(t *testing.T) {

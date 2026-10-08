@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 const balancerMode = "netforge-balancer"

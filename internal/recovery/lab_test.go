@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/loadbalancer"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/loadbalancer"
 )
 
 type balancerExecutor struct {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 type Action string
@@ -35,6 +35,15 @@ func Actions() []Action {
 		ActionRestoreBackend,
 		ActionDrainConnection,
 		ActionReEnableBackend,
+	}
+}
+
+func (a Action) NeedsBalancer() bool {
+	switch a {
+	case ActionRemoveBackend, ActionRestoreBackend, ActionDrainConnection, ActionReEnableBackend:
+		return true
+	default:
+		return false
 	}
 }
 

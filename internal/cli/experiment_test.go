@@ -4,6 +4,12 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/codingseeker/netforge/internal/experiment"
+	"github.com/codingseeker/netforge/internal/investigator"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/recovery"
+	"github.com/codingseeker/netforge/internal/report"
 )
 
 func TestExperimentPlanPrintsTheLifecycle(t *testing.T) {
@@ -305,5 +311,61 @@ func TestTheNewCommandsAppearInHelp(t *testing.T) {
 		if !strings.Contains(group.stdout, subcommand) {
 			t.Errorf("the %s help %q does not list the %s subcommand", command, group.stdout, subcommand)
 		}
+	}
+}
+
+func TestTheRenderedRecommendationIsAFlagTheCommandLineAccepts(t *testing.T) {
+	diagnosed := investigator.Report{
+		Diagnosis: investigator.Probable,
+		Layer:     "network",
+		Summary:   "the path to the target is impaired",
+		Observation: investigator.Observation{
+			Namespace: "service-a",
+			Target:    "10.42.0.3",
+		},
+	}
+	var finished experiment.Report
+	finished.Name = "cascading-failure"
+	finished.ExperimentID = "nf-cascading-failure-a5ed9ba6"
+	finished.Diagnosis = diagnosed
+	finished.Observed = []probe.Measurement{{Namespace: "service-a", Target: "10.42.0.3"}}
+	finished.Recommendation = recovery.Propose(diagnosed)
+	if finished.Recommendation.Action == "" {
+		t.Fatal("the diagnosis proposes no action, so the test would prove nothing")
+	}
+
+	rendered := report.FromExperiment(finished, nil).Recommendation.Flag
+	value, found := strings.CutPrefix(rendered, "-recover ")
+	if !found {
+		t.Fatalf("the recommendation %q is not a -recover flag", rendered)
+	}
+
+	result := run(t, context.Background(), "",
+		"experiment", "plan",
+		"--namespace", "service-a",
+		"--target", "10.42.0.3",
+		"--port", "7000",
+		"-recover", value,
+		"-authorize",
+		"-why", "the report's own recommendation, followed to the letter",
+		testdata(t, "valid-full.yaml"))
+	if result.err != nil {
+		t.Fatalf("the recommendation %q does not compile: %v", rendered, result.err)
+	}
+	if !strings.Contains(result.stdout, "recoveries: 1") {
+		t.Errorf("stdout %q does not count the recommendation as one authorized recovery", result.stdout)
+	}
+	if !strings.Contains(result.stdout, finished.Recommendation.Action.String()+" service-a") {
+		t.Errorf("stdout %q does not name the action the report recommended", result.stdout)
+	}
+}
+
+func TestAReportWithNoRecommendationRendersNoFlag(t *testing.T) {
+	var empty experiment.Report
+	empty.Diagnosis = investigator.Report{Diagnosis: investigator.Unknown}
+	empty.Recommendation = recovery.Propose(empty.Diagnosis)
+
+	if flag := report.FromExperiment(empty, nil).Recommendation.Flag; flag != "" {
+		t.Errorf("a run that diagnosed nothing still recommends %q", flag)
 	}
 }

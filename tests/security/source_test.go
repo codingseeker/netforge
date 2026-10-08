@@ -30,6 +30,7 @@ var processBoundary = map[string]map[string]bool{
 	"internal/namespace/agent.go":       {`"syscall"`: true, `"os/signal"`: true, `"os/exec"`: true},
 	"internal/namespace/lab.go":         {`"syscall"`: true, `"os/exec"`: true},
 	"internal/namespace/setns_linux.go": {`"syscall"`: true},
+	"internal/network/balancer.go":      {`"syscall"`: true},
 	"internal/network/router.go":        {`"syscall"`: true},
 	"internal/network/service.go":       {`"syscall"`: true},
 	"internal/service/service.go":       {`"syscall"`: true, `"os/signal"`: true},

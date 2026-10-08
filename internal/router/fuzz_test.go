@@ -4,7 +4,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/netforge/netforge/internal/packet"
+	"github.com/codingseeker/netforge/internal/packet"
 )
 
 func FuzzDecide(f *testing.F) {

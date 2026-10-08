@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/chaos"
-	"github.com/netforge/netforge/internal/network"
-	"github.com/netforge/netforge/internal/probe"
-	"github.com/netforge/netforge/internal/transport"
+	"github.com/codingseeker/netforge/internal/chaos"
+	"github.com/codingseeker/netforge/internal/network"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/transport"
 )
 
 const (
@@ -427,7 +427,7 @@ func runTransfer(s stream) (measurement, error) {
 	}
 
 	started := time.Now()
-	delivered, matched, answers := 0, 0, 0
+	delivered, matched := 0, 0
 	var roundTrip time.Duration
 	writeDone := make(chan error, 1)
 	go func() {
@@ -472,7 +472,6 @@ func runTransfer(s stream) (measurement, error) {
 			break
 		}
 		delivered += len(answered)
-		answers++
 		key := string(answered)
 		if index, wanted := expected[key]; wanted {
 			delete(expected, key)
@@ -484,7 +483,9 @@ func runTransfer(s stream) (measurement, error) {
 	if err := <-writeDone; err != nil {
 		return tally(err)
 	}
-	_ = answers
+	if delivered == 0 {
+		return tally(errors.New("the transfer delivered nothing at all"))
+	}
 	return tally(nil)
 }
 

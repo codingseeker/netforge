@@ -6,19 +6,20 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/chaos"
-	"github.com/netforge/netforge/internal/config"
-	"github.com/netforge/netforge/internal/experiment"
-	"github.com/netforge/netforge/internal/logging"
-	"github.com/netforge/netforge/internal/network"
-	"github.com/netforge/netforge/internal/probe"
-	"github.com/netforge/netforge/internal/recovery"
-	"github.com/netforge/netforge/internal/report"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/chaos"
+	"github.com/codingseeker/netforge/internal/config"
+	"github.com/codingseeker/netforge/internal/experiment"
+	"github.com/codingseeker/netforge/internal/logging"
+	"github.com/codingseeker/netforge/internal/network"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/recovery"
+	"github.com/codingseeker/netforge/internal/report"
 )
 
 type experimentOptions struct {
@@ -43,6 +44,9 @@ type experimentOptions struct {
 	routing         string
 	servicePorts    uint
 	serviceBasePort uint
+	balancer        uint
+	balancerBase    uint
+	recoverFrom     string
 }
 
 type stringList []string
@@ -58,7 +62,8 @@ func experimentFlags(fs *flag.FlagSet, opts *experimentOptions) {
 	fs.StringVar(&opts.namespace, "namespace", "", "laboratory namespace the experiment measures from")
 	fs.StringVar(&opts.target, "target", "", "address the experiment observes")
 	fs.UintVar(&opts.port, "port", 0, "port measured, for the protocols that use one")
-	fs.StringVar(&opts.protocol, "protocol", "tcp", "protocol the observation is about: icmp, tcp, udp, dns, tls or http")
+	fs.StringVar(&opts.protocol, "protocol", "tcp",
+		"protocol the observation is about: icmp, tcp, udp, rudp, dns, tls or http")
 	fs.IntVar(&opts.count, "count", 5, "probes per measurement")
 	fs.IntVar(&opts.size, "size", 64, "payload bytes per probe")
 	fs.DurationVar(&opts.timeout, "timeout", time.Second, "how long one probe may wait for its reply")
@@ -66,6 +71,9 @@ func experimentFlags(fs *flag.FlagSet, opts *experimentOptions) {
 	fs.DurationVar(&opts.afterFault, "after-fault", 200*time.Millisecond, "how long a fault is given to reach the kernel")
 	fs.DurationVar(&opts.settle, "settle", 200*time.Millisecond, "how long a change is given to take effect")
 	fs.Var(&opts.recover, "recover", "an authorized recovery action, as action:target; may be given more than once")
+	fs.StringVar(&opts.recoverFrom, "recover-from", "",
+		"the namespace an address recovery is verified from; an address does not say where the measurement comes from, "+
+			"so it defaults to --namespace")
 	fs.BoolVar(&opts.authorize, "authorize", false, "authorize the -recover actions; without it they are refused")
 	fs.StringVar(&opts.reason, "why", "", "why the recovery actions were authorized")
 }
@@ -174,6 +182,10 @@ func experimentRun() *Command {
 					"and a protocol that needs a listener must ask for at least one")
 			fs.UintVar(&opts.serviceBasePort, "service-base-port", 0,
 				"the first port a serving namespace binds; the i-th binds base+i; default the observation's -port")
+			fs.UintVar(&opts.balancer, "balancer", 0,
+				"put a load balancer in the laboratory's path, in front of the first --balancer servers")
+			fs.UintVar(&opts.balancerBase, "balancer-base-port", 0,
+				"the ports the balancer and its backends bind: the balancer takes base and the i-th backend takes base+1+i")
 			return opts
 		},
 		Run: func(ctx context.Context, session *Session, options any, args []string) error {
@@ -222,15 +234,16 @@ func experimentRun() *Command {
 			if err != nil {
 				return err
 			}
+			controller.WithLogger(logging.WithExperiment(session.Logger, plan.ExperimentID))
 			run, _ := controller.Run(ctx)
 
 			reportErr := opts.writeReport(session.Env.stdout(), run, environment.Summary())
 			logger := session.Logger.With(slog.String(logging.FieldExperimentID, run.ExperimentID))
 			if run.Succeeded() {
-				logger.Info("experiment run succeeded",
+				logger.Info(logging.EventRunSucceeded,
 					slog.Duration("duration", run.Duration))
 			} else {
-				logger.Warn("experiment run failed",
+				logger.Warn(logging.EventRunFailed,
 					slog.String("state", string(run.Failed)),
 					slog.Duration("duration", run.Duration))
 			}
@@ -459,8 +472,22 @@ func (o *experimentOptions) labSpec(document config.Config, experimentID string)
 		spec.ID = experimentID
 	}
 	o.id = spec.ID
+	plan, err := network.BuildPlan(spec.ID, spec.Network, spec.Clients, spec.Servers, spec.MTU)
+	if err != nil {
+		return network.Spec{}, apperr.Wrap(err, kindOf(err), op, "the laboratory could not be planned")
+	}
 	if spec.Services, err = o.serviceSpecs(spec.Network); err != nil {
 		return network.Spec{}, err
+	}
+	if spec.Balancer, err = o.balancerPlan(plan); err != nil {
+		return network.Spec{}, err
+	}
+	if spec.Balancer != nil {
+		backends, err := o.balancerServices(plan)
+		if err != nil {
+			return network.Spec{}, err
+		}
+		spec.Services = append(spec.Services, backends...)
 	}
 	return spec, nil
 }
@@ -512,9 +539,14 @@ func (o *experimentOptions) requests() ([]recovery.Request, error) {
 			return nil, apperr.InvalidArgument("cli.experiment.plan",
 				"-recover "+quote(entry)+" is not action:target", nil)
 		}
+		from := strings.TrimSpace(o.recoverFrom)
+		if from == "" {
+			from = strings.TrimSpace(o.namespace)
+		}
 		out = append(out, recovery.Request{
 			Action:  recovery.Action(strings.TrimSpace(action)),
 			Target:  strings.TrimSpace(target),
+			From:    from,
 			Reason:  o.reason,
 			Consent: o.authorize,
 		})
@@ -564,11 +596,16 @@ func recoveryActions() *Command {
 				if action.Destructive() {
 					kind = "destructive"
 				}
-				fmt.Fprintf(out, "%-20s %-12s %s\n", action, kind, actionTarget(action))
+				needs := ""
+				if action.NeedsBalancer() {
+					needs = "  (needs --balancer)"
+				}
+				fmt.Fprintf(out, "%-20s %-12s %s%s\n", action, kind, actionTarget(action), needs)
 			}
 			fmt.Fprintln(out, "")
 			fmt.Fprintln(out, "a recovery requires: explicit authorization + scope validation + action validation")
 			fmt.Fprintln(out, "                       + actual recovery + verification by measurement")
+			fmt.Fprintln(out, "an action aimed at an address is verified from -recover-from, or from -namespace")
 			return nil
 		},
 	}
@@ -592,4 +629,88 @@ func protocolList() string {
 		names = append(names, string(protocol))
 	}
 	return strings.Join(names, ", ")
+}
+
+func (o *experimentOptions) balancerRange() (backends int, base uint16, err error) {
+	const op = "cli.experiment.run"
+	backends = int(o.balancer)
+	if backends == 0 {
+		if o.balancerBase != 0 {
+			return 0, 0, apperr.InvalidArgument(op, "-balancer-base-port is "+
+				strconv.FormatUint(uint64(o.balancerBase), 10)+" but -balancer is 0, so nothing would bind it", nil)
+		}
+		return 0, 0, nil
+	}
+	if backends > o.servers {
+		return 0, 0, apperr.InvalidArgument(op, "-balancer is "+strconv.Itoa(backends)+
+			" but -servers is "+strconv.Itoa(o.servers)+": there are only that many backends to distribute to", nil)
+	}
+	start := uint64(o.balancerBase)
+	if start == 0 {
+		start = uint64(o.port)
+	}
+	if start == 0 {
+		return 0, 0, apperr.Validation(op, "a balancer needs a port: -port is 0 and -balancer-base-port was not given", nil)
+	}
+	last := start + uint64(backends)
+	if start > maxPort || last > maxPort {
+		return 0, 0, apperr.InvalidArgument(op, "-balancer-base-port is "+
+			strconv.FormatUint(start, 10)+" and "+strconv.Itoa(backends)+
+			" backends would bind up to "+strconv.FormatUint(last, 10)+
+			", which is past the last port", nil)
+	}
+	return backends, uint16(start), nil
+}
+
+func (o *experimentOptions) balancerPlan(plan network.Plan) (*network.BalancerSpec, error) {
+	const op = "cli.experiment.run"
+	backends, base, err := o.balancerRange()
+	if err != nil {
+		return nil, err
+	}
+	if backends == 0 {
+		return nil, nil
+	}
+	placed, err := network.AddBalancer(plan)
+	if err != nil {
+		return nil, apperr.Wrap(err, kindOf(err), op, "the laboratory could not be planned with a balancer")
+	}
+	node, ok := placed.Balancer()
+	if !ok {
+		return nil, apperr.Internal(op, "the plan carries a balancer flag but no balancer node", nil)
+	}
+	spec := &network.BalancerSpec{
+		Namespace: node.Namespace,
+		Listen:    net.JoinHostPort(node.Address.Addr().String(), strconv.Itoa(int(base))),
+	}
+	for i := 0; i < backends; i++ {
+		spec.Backends = append(spec.Backends,
+			net.JoinHostPort(placed.Servers()[i].Address.Addr().String(), strconv.Itoa(int(base)+1+i)))
+	}
+	return spec, nil
+}
+
+func (o *experimentOptions) balancerServices(plan network.Plan) ([]network.ServiceSpec, error) {
+	const op = "cli.experiment.run"
+	backends, base, err := o.balancerRange()
+	if err != nil {
+		return nil, err
+	}
+	if backends == 0 {
+		return nil, nil
+	}
+	placed, err := network.AddBalancer(plan)
+	if err != nil {
+		return nil, apperr.Wrap(err, kindOf(err), op, "the laboratory could not be planned with a balancer")
+	}
+	servers := placed.Servers()
+	out := make([]network.ServiceSpec, 0, backends)
+	for i := 0; i < backends; i++ {
+		spec, err := network.ReliableServiceFor(servers[i].Namespace, base+1+uint16(i))
+		if err != nil {
+			return nil, apperr.Wrap(err, kindOf(err), op, "a backend could not be given a reliable endpoint")
+		}
+		out = append(out, spec)
+	}
+	return out, nil
 }

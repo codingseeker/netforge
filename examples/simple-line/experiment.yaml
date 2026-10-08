@@ -3,11 +3,11 @@ name: simple-line
 seed: 20260101
 
 scope:
-  network: 10.42.0.0/16
+  network: 10.42.0.0/24
   namespaces:
-    - client
-    - router
-    - server
+    - nf-client0-demo
+    - nf-server0-demo
+    - nf-router-demo
 
 limits:
   max_namespaces: 4
@@ -16,3 +16,8 @@ limits:
   max_bandwidth: 200Mbps
   max_packet_rate: 5000
   max_concurrent_probes: 10
+
+faults:
+  - target: nf-server0-demo
+    type: packet_loss
+    value: 80%

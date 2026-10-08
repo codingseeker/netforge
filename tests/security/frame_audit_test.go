@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/packet"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/packet"
 )
 
 var (

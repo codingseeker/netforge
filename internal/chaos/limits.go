@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/namespace"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/namespace"
 )
 
 const (

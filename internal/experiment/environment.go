@@ -5,12 +5,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/chaos"
-	"github.com/netforge/netforge/internal/investigator"
-	"github.com/netforge/netforge/internal/network"
-	"github.com/netforge/netforge/internal/probe"
-	"github.com/netforge/netforge/internal/recovery"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/chaos"
+	"github.com/codingseeker/netforge/internal/investigator"
+	"github.com/codingseeker/netforge/internal/network"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/recovery"
 )
 
 type LabEnvironment struct {
@@ -32,6 +32,8 @@ type LabEnvironment struct {
 }
 
 const routerReadWindow = 5 * time.Second
+
+const balancerReadWindow = 5 * time.Second
 
 func NewLabEnvironment(plan Plan, spec network.Spec, build func(context.Context, network.Spec) (*network.Lab, error)) (*LabEnvironment, error) {
 	const op = "experiment.NewLabEnvironment"
@@ -73,10 +75,14 @@ func (e *LabEnvironment) Setup(ctx context.Context) error {
 	e.lab = lab
 
 	summary := lab.Summary()
+	summary.Balancer = lab.BalancerSummary()
 	e.summary = &summary
 	if e.agent == nil {
-
-		agent, err := recovery.NewLab(lab, nil, e.plan.Observation.Settle)
+		backends, err := e.backends()
+		if err != nil {
+			return apperr.Wrap(err, kindOf(err), op, "the recovery actions could not be bound to a balancer")
+		}
+		agent, err := recovery.NewLab(lab, backends, e.plan.Observation.Settle)
 		if err != nil {
 			return apperr.Wrap(err, kindOf(err), op, "the recovery agent could not be created")
 		}
@@ -84,6 +90,22 @@ func (e *LabEnvironment) Setup(ctx context.Context) error {
 		e.prober = agent
 	}
 	return nil
+}
+
+func (e *LabEnvironment) backends() (recovery.BackendController, error) {
+	const op = "experiment.LabEnvironment.backends"
+	if e.lab == nil {
+		return nil, apperr.Internal(op, "the laboratory has not been created", nil)
+	}
+	path, experiment, ok := e.lab.BalancerControl()
+	if !ok {
+		return nil, nil
+	}
+	control, err := recovery.NewControlFile(path, experiment)
+	if err != nil {
+		return nil, err
+	}
+	return control, nil
 }
 
 func (e *LabEnvironment) Baseline(ctx context.Context) ([]probe.Measurement, error) {
@@ -110,7 +132,7 @@ func (e *LabEnvironment) measure(ctx context.Context, phase string) ([]probe.Mea
 		return nil, apperr.Internal(op, "the laboratory has not been created", nil)
 	}
 	observation := e.plan.Observation
-	measurement, err := e.lab.Measure(ctx, observation.Namespace, observation.Target, observation.Options)
+	measurement, err := e.measureOne(ctx, observation)
 	if err != nil {
 		return nil, apperr.Wrap(err, kindOf(err), op, "the "+phase+" measurement failed")
 	}
@@ -149,10 +171,12 @@ func (e *LabEnvironment) Diagnose(ctx context.Context, observed []probe.Measurem
 		return investigator.Report{}, apperr.Internal(op, "there is nothing to diagnose", nil)
 	}
 	failure := observed[0]
-	if failure.Loss == 0 && failure.Received == failure.Sent && failure.Sent > 0 {
 
+	if failure.Loss == 0 && failure.Received == failure.Sent && failure.Sent > 0 &&
+		failure.Retransmitted == 0 {
 		return investigator.Report{}, apperr.Validation(op,
-			"the path answered all "+strconv.Itoa(failure.Sent)+" probes, so there is no failure to diagnose", nil)
+			"the path answered all "+strconv.Itoa(failure.Sent)+" probes without retransmitting, "+
+				"so there is no failure to diagnose", nil)
 	}
 	investigatorEngine, err := e.lab.Investigator(investigator.DefaultLimits())
 	if err != nil {
@@ -221,7 +245,7 @@ func (e *LabEnvironment) Teardown(ctx context.Context) error {
 
 		return nil
 	}
-	e.recordRouter()
+	e.recordClosingState()
 	err := e.lab.Destroy(ctx)
 	e.lab = nil
 	e.agent = nil
@@ -232,8 +256,27 @@ func (e *LabEnvironment) Teardown(ctx context.Context) error {
 	return nil
 }
 
+func (e *LabEnvironment) recordClosingState() {
+	if e.lab == nil || e.summary == nil {
+		return
+	}
+	e.recordBalancer()
+	e.recordRouter()
+}
+
+func (e *LabEnvironment) recordBalancer() {
+	if e.summary.Balancer == nil {
+		return
+	}
+
+	after := e.summary.Balancer.Marked()
+	if summary := e.lab.BalancerSummaryAfter(after, balancerReadWindow); summary != nil {
+		e.summary.Balancer = summary
+	}
+}
+
 func (e *LabEnvironment) recordRouter() {
-	if e.lab == nil || e.summary == nil || e.summary.Routing != network.RoutingSoftware {
+	if e.summary.Routing != network.RoutingSoftware {
 		return
 	}
 	if !e.lab.RouterAlive() {
@@ -281,3 +324,70 @@ func failureOf(measurement probe.Measurement) probe.Failure {
 }
 
 func (e *LabEnvironment) BaselineOf() []probe.Measurement { return e.baseline }
+
+func (e *LabEnvironment) measureOne(ctx context.Context, observation Observation) (probe.Measurement, error) {
+	const op = "experiment.measureOne"
+	if observation.Protocol != probe.ProtocolRUDP {
+		return e.lab.Measure(ctx, observation.Namespace, observation.Target, observation.Options)
+	}
+	rounds := observation.Options.Count
+	if rounds <= 0 {
+		rounds = 1
+	}
+	started := time.Now()
+	accumulated := probe.Measurement{
+		Namespace: observation.Namespace,
+		Target:    observation.Target,
+		At:        started,
+		Options:   observation.Options,
+	}
+	limits := probe.RUDPLimits(observation.Options.Size)
+	accumulated.Transport = &probe.TransportLimits{
+		MaxPayload:     limits.MaxPayload,
+		MaxWindow:      limits.MaxWindow,
+		MaxConnections: limits.MaxConnections,
+		IdleTimeout:    int64(limits.IdleTimeout),
+	}
+	answered := 0
+	for round := 0; round < rounds; round++ {
+		request := probe.Request{
+			Experiment: e.plan.ExperimentID,
+			Namespace:  observation.Namespace,
+			Target:     observation.Target,
+			Port:       observation.Port,
+			Protocol:   probe.ProtocolRUDP,
+			Payload:    observation.Options.Size,
+			Timeout:    observation.Options.Timeout,
+		}
+		result, err := e.lab.Probe(ctx, request)
+
+		if err == nil {
+			answered++
+			accumulated.Bytes += int64(result.ResponseSize)
+			accumulated.AverageRTT += result.RTT
+			accumulated.MaxRTT = max(accumulated.MaxRTT, result.RTT)
+			if round == 0 || result.RTT < accumulated.MinRTT {
+				accumulated.MinRTT = result.RTT
+			}
+		}
+		if diagnostic, ok := result.Diagnostics(); ok {
+			accumulated.Retransmitted += diagnostic
+		}
+		if err != nil && answered == 0 && round == rounds-1 {
+			return probe.Measurement{}, err
+		}
+	}
+	elapsed := time.Since(started)
+	if elapsed <= 0 {
+		elapsed = time.Nanosecond
+	}
+	accumulated.Sent = rounds
+	accumulated.Received = answered
+	accumulated.Duration = elapsed
+	if answered > 0 {
+		accumulated.AverageRTT /= time.Duration(answered)
+	}
+	accumulated.Loss = float64(rounds-answered) * 100 / float64(rounds)
+	accumulated.Goodput = uint64(float64(accumulated.Bytes) * 8 / elapsed.Seconds())
+	return accumulated, nil
+}

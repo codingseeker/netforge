@@ -225,13 +225,19 @@ func serve(req request, self int) response {
 
 func write(req request) response {
 	reply := response{ID: req.ID, Op: req.Op}
-	if len(req.Argv) != 2 || !strings.HasPrefix(req.Argv[0], "/proc/sys/net/") {
-		reply.Err = "only a /proc/sys/net path with a value may be written"
+	if len(req.Argv) != 2 {
+		reply.Err = "only a /proc/sys/net/ path with a value may be written"
 		reply.Code = -1
 		return reply
 	}
-	err := inNamespace(req.PID, func() error {
-		return os.WriteFile(req.Argv[0], []byte(req.Argv[1]), 0o644)
+	target, err := procSysNetPath(req.Argv[0])
+	if err != nil {
+		reply.Err = err.Error()
+		reply.Code = -1
+		return reply
+	}
+	err = inNamespace(req.PID, func() error {
+		return os.WriteFile(target, []byte(req.Argv[1]), 0o644)
 	})
 	if err != nil {
 		reply.Err = err.Error()

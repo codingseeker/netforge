@@ -6,7 +6,7 @@ support the claim "the experiment controller validates namespace and CIDR
 scope for supported operations" and to avoid claims such as "secure" or
 "production-ready", which are not supported by evidence.
 
-Phase 2 does touch the network, but only inside namespaces NetForge created
+NetForge does touch the network, but only inside namespaces it created
 itself. The packet layer is pure. The privileged boundary is `internal/iface`
 and `internal/namespace`, and it is confined by a security test.
 
@@ -21,11 +21,14 @@ The ban is absolute: it applies to the process boundary as much as to the rest
 of the tree.
 
 Command execution exists, in one place. `internal/namespace` is the only package
-that may import `os/exec` or `syscall`, and the boundary is declared as data in
-the security test, which fails in two directions: a listed file that stops
-using the boundary, and a file that starts using it without being listed. A
-separate test requires every file that runs a helper command to live under
-`internal/namespace`.
+that may import `os/exec`, and it is where a helper command is run. The narrower
+`syscall` import is declared per file rather than confined to that package,
+because a signal handler needs it to name a signal and a `setns` needs it to name
+a namespace, neither of which starts a process. Both sets are declared as data in
+the security test, which fails in two directions: a listed file that stops using
+what it was listed for, and a file that starts importing something it was not
+listed for. A separate test requires every file that runs a helper command to
+live under `internal/namespace`.
 
 NetForge drives `ip` with `exec.Command` and separate arguments, never a shell
 string. Arguments are validated first: interface names against the kernel's
@@ -70,12 +73,12 @@ NetForge never runs as root and never elevates. Nothing in the code calls
 `seteuid`, `setuid`, `os/user` or `syscall.Setuid`, and the `os/user` import is
 covered by the boundary test. The integration suite asserts that `version`,
 `help`, `limits show` and `config validate` succeed without privileges, and the
-Phase 2 suites run the whole topology as the invoking user.
+network suites run the whole topology as the invoking user.
 
 The capabilities that make namespaces work are namespaced capabilities: the
 process is root only inside a user namespace it created, and that user namespace
 owns every namespace NetForge touches. Where the kernel does not grant
-unprivileged user namespaces, the Phase 2 tests skip rather than pretend.
+unprivileged user namespaces, the network suites skip rather than pretend.
 
 The `internal/cli/signals.go` boundary is the only place where the process
 observes privileged kernel interfaces, and it only maps `SIGINT` and `SIGTERM`
@@ -359,8 +362,9 @@ A configured fault value is not a measurement and is never reported as one.
 
 ## Controls that do not exist yet
 
-These are required by later phases and are absent today. They must not be
-claimed until the corresponding phase is complete and evidenced.
+These are known gaps. They are listed so that a reader does not have to infer
+them from silence, and none of them is claimed as implemented anywhere else in
+this repository.
 
 - Reconciliation of anything a `SIGKILL`ed run leaves other than files. A
   namespace dies with the holder that was keeping it open, because the holder is
@@ -371,7 +375,7 @@ claimed until the corresponding phase is complete and evidenced.
   sweep on startup: reclamation is an operator's decision, with an authorization
   and a reason.
 - Bandwidth, rate and concurrency enforcement at the kernel.
-- Socket buffer limits and per-interface queue disciplines (Phase 7).
+- Socket buffer limits and per-interface queue disciplines.
 
 ## Dependency posture
 

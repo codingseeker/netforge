@@ -1,8 +1,6 @@
 # NetForge Architecture
 
 This document describes the structure that exists in the repository today.
-Later phases add the packages listed in `todo.md`; each is created when the
-phase that needs it starts, and this document is updated in the same change.
 
 ## Layers
 
@@ -73,9 +71,9 @@ crafted path cannot escape that prefix with `..`.
 
 ## The software router
 
-Phase 3 adds a router that lives in the router namespace and forwards real
-frames without the kernel. It runs as its own process so that the laboratory
-agent stays a request and response channel and never carries a data plane.
+The router lives in the router namespace and forwards real frames without the
+kernel. It runs as its own process so that the laboratory agent stays a request
+and response channel and never carries a data plane.
 
 ```text
 netforge netforge-router '<json config>'
@@ -261,7 +259,7 @@ trip times, goodput, duplicate replies, out-of-order replies and errors from
 it. A report it cannot parse is an error, never a zero, so a measurement
 cannot pass by being empty.
 
-The Phase 4 tests measure every fault kind on real traffic. Each case measures
+The fault tests measure every fault kind on real traffic. Each case measures
 the same path before the fault, with the traffic pattern the fault needs to be
 visible: a bandwidth ceiling is only visible when the sender offers more than
 the ceiling, and packets can only be reordered while several are in flight. No
@@ -280,7 +278,7 @@ network the laboratory declared. A refused request is never sent.
 Two measurements exist and they are not the same thing. An echo is measured by
 the kernel's own tool inside the namespace and the report it prints is parsed;
 a report that cannot be parsed is an error, never a zero, so a measurement
-cannot pass by being empty. The other five protocols are measured by
+cannot pass by being empty. The other six protocols are measured by
 `netforge-probe`, a mode of the same binary, re-executed in the target
 namespace by the agent and handed the request on its standard input. The answer
 comes back on standard output as one JSON line, bounded by `MaxResponseSize`.
@@ -364,33 +362,35 @@ goroutine count does not grow.
 | Suite | Location | What it proves |
 | --- | --- | --- |
 | Unit tests | `internal/**/*_test.go` | pure behaviour, error classification, validation, lifecycle, address planning |
-| Fuzz tests | `internal/config/fuzz_test.go` | the configuration parser and the percentage parser never panic and never accept an invalid document |
+| Fuzz tests | `internal/config/fuzz_test.go` | the configuration parser, the bandwidth, duration and percentage parsers and the name validator never panic and never accept an invalid document |
 | Integration tests | `tests/integration/` | the built binary behaves as documented, exits with the documented status, is unprivileged, parsing has no side effects, and real isolated traffic crosses a real router |
 | Security invariants | `tests/security/` | no shell anywhere, no process execution outside the process boundary, the packet layer is pure and bounded, no secrets, no embedded targets, required documentation present |
-| Packet fuzzing | `internal/packet/fuzz_test.go` | the seven packet fuzzers never panic and never accept malformed input |
+| Packet fuzzing | `internal/packet/fuzz_test.go` | the eight packet and checksum fuzzers never panic and never accept malformed input |
 | Router fuzzing | `internal/router/fuzz_test.go` | the forwarding decision and the ICMP error builder never panic on any frame |
 
-Linux networking behaviour is not mocked. The Phase 2 tests exercise real
-namespaces, real veth pairs and real traffic, and the evidence includes
-namespace, interface and route inspection together with a comparison of host
-links, host routes and host forwarding before and after.
+Linux networking behaviour is not mocked. `tests/integration/phase2_test.go`
+exercises real namespaces, real veth pairs and real traffic, and the evidence
+includes namespace, interface and route inspection together with a comparison of
+host links, host routes and host forwarding before and after.
 
-The Phase 3 tests keep that rule: they send ICMP traffic between two real
-namespaces through the userspace router with kernel forwarding switched off in
-the router namespace, and they check the time to live, the counters and the
-neighbour cache that the router reports afterwards.
+`tests/integration/router_test.go` and `tests/integration/network_test.go` keep
+that rule: they
+send ICMP traffic between two real namespaces through the userspace router with
+kernel forwarding switched off in the router namespace, and they check the time
+to live, the counters and the neighbour cache that the router reports afterwards.
 
-The Phase 4 tests keep it as well: every fault kind is injected into a real
-laboratory, measured with a real probe, and compared against the kernel's own
-record of the qdisc. Removing the fault has to restore the path, a fault
-outside the declared scope has to be refused, and a laboratory that cannot
+`tests/integration/chaos_test.go` keeps it as well: every fault kind is injected
+into a real laboratory, measured with a real probe, and compared against the
+kernel's own record of the qdisc. Removing the fault has to restore the path, a
+fault outside the declared scope has to be refused, and a laboratory that cannot
 honour its declared faults has to fail and leave nothing behind.
 
-The Phase 5 tests keep it too: all six protocols are measured from a client
-namespace against a service the laboratory itself started, and the far end of
-every probe is a real listener rather than a fixture.
+`tests/integration/probe_test.go` keeps it too: all six protocols are measured
+from a client namespace against a service the laboratory itself started, and the
+far end of every probe is a real listener rather than a fixture.
 
-The Phase 6 tests keep it as well, and they are the reason the rules above
+`tests/integration/investigator_test.go` keeps it as well, and they are the
+reason the rules above
 exist. Each diagnosis is made against a real namespace and a real listener or a
 real netem fault, and the tests assert the *honest* reading rather than a
 convenient one: a refused handshake has to be diagnosed at the transport, a

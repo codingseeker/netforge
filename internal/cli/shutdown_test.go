@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/cleanup"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/cleanup"
 )
 
 func TestNotifySignalsCancelsContextSigterm(t *testing.T) {

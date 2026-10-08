@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/reconcile"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/reconcile"
 )
 
 func auditRoot(t *testing.T) string {

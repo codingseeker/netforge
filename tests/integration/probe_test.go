@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/network"
-	"github.com/netforge/netforge/internal/probe"
-	"github.com/netforge/netforge/internal/service"
+	"github.com/codingseeker/netforge/internal/network"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/service"
 )
 
 func probeLabSpec(t *testing.T, id, cidr string) (network.Spec, network.Plan) {

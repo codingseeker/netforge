@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/transport"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/transport"
 )
 
 func TestTheDefaultLimitsAreBoundedAndUsable(t *testing.T) {

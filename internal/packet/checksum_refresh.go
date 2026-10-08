@@ -3,7 +3,7 @@ package packet
 import (
 	"strconv"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 func RefreshTransportChecksum(ip *IPv4) error {

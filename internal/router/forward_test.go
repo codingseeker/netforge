@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/netforge/netforge/internal/packet"
+	"github.com/codingseeker/netforge/internal/packet"
 )
 
 func testRouter(t *testing.T) *Router {

@@ -276,15 +276,15 @@ boundary, malformed headers, invalid lengths, invalid checksums, oversized
 packets, boundary values at the exact minimum and maximum of each field, and
 round trips.
 
-- `vectors_test.go` holds golden byte strings derived from the RFCs
+- `internal/packet/vectors_test.go` holds golden byte strings derived from the RFCs
   independently of this implementation, plus a vector produced by a separate
   generator. Round trips are tested against the golden bytes, not against
   whatever the code happens to produce.
-- `allocations_test.go` measures allocations and asserts bounds on both count
+- `internal/packet/allocations_test.go` measures allocations and asserts bounds on both count
   and bytes.
-- `fuzz_test.go` has seven targets: `FuzzParseEthernet`, `FuzzParseIPv4`,
-  `FuzzParseICMP`, `FuzzParseUDP`, `FuzzParseTCP`, `FuzzParseFrame` and
-  `FuzzChecksum`. Each asserts round-trip and validity invariants, so a fuzzer
+- `internal/packet/fuzz_test.go` has eight targets: `FuzzParseEthernet`,
+  `FuzzParseIPv4`, `FuzzParseICMP`, `FuzzParseUDP`, `FuzzParseTCP`,
+  `FuzzParseFrame`, `FuzzChecksum` and `FuzzRefreshTransportChecksum`. Each asserts round-trip and validity invariants, so a fuzzer
   finds a behavioural regression and not only a crash.
 - `make fuzz-packet FUZZ_TIME=30s` runs all seven. `make fuzz-router
   FUZZ_TIME=30s` runs `FuzzDecide` and `FuzzICMPError` in `internal/router`,

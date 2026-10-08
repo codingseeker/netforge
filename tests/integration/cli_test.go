@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/codingseeker/netforge/internal/logging"
 )
 
 func TestBinaryExistsAndIsExecutable(t *testing.T) {
@@ -109,6 +111,62 @@ func TestConfigValidateAcceptsRepoExample(t *testing.T) {
 	}
 }
 
+// An example that validates but cannot build a laboratory is worse than no
+// example: the reader types the documented command and is refused. Validation
+// happens before any namespace exists, so only running one proves the shipped
+// examples are the ones the documentation promises.
+func TestTheShippedExamplesActuallyRun(t *testing.T) {
+	cases := []struct {
+		example string
+		flags   []string
+	}{
+		{
+			example: "simple-line",
+			flags:   []string{"--count", "4"},
+		},
+		{
+			example: "cascading-failure",
+			flags:   []string{"--count", "6", "--deadline", "6s"},
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.example, func(t *testing.T) {
+			document := repoFile("examples", test.example, "experiment.yaml")
+			args := append([]string{
+				"experiment", "run",
+				"--id", "demo",
+				"--namespace", "nf-client0-demo",
+				"--target", "10.42.0.6",
+				"--protocol", "icmp",
+				"--timeout", "300ms",
+				"--after-fault", "300ms",
+				"--recover", "remove_fault:nf-server0-demo",
+				"--authorize",
+				"--why", "the shipped example removes the loss its own document declared",
+				"--output", "json",
+			}, test.flags...)
+			result := execNetforge(t, "", append(args, document)...)
+			if result.exitCode != 0 {
+				t.Fatalf("the shipped %s example does not run: exit %d\n%s\n%s",
+					test.example, result.exitCode, result.stdout, result.stderr)
+			}
+			report := parseReport(t, result.stdout)
+			if !report.succeeded || !report.cleanedUp {
+				t.Errorf("the shipped %s example reported succeeded=%t cleaned_up=%t",
+					test.example, report.succeeded, report.cleanedUp)
+			}
+			if len(report.recoveries) != 1 || !report.recoveries[0].passed {
+				t.Errorf("the shipped %s example did not recover: %+v", test.example, report.recoveries)
+			}
+			if len(report.faults) != 1 {
+				t.Errorf("the shipped %s example applied %d faults, want the one it declares",
+					test.example, len(report.faults))
+			}
+		})
+	}
+}
+
 func TestConfigValidateRejectsMalformedRepoExamples(t *testing.T) {
 	invalid := repoFile("examples", "invalid")
 	if _, err := os.Stat(invalid); err == nil {
@@ -171,41 +229,58 @@ func TestStructuredJSONLogs(t *testing.T) {
 	if !strings.HasPrefix(strings.TrimSpace(got.stderr), "{") {
 		t.Fatalf("stderr %q is not JSON", got.stderr)
 	}
-	for _, want := range []string{`"level":"info"`, `"event":"configuration validated"`, `"component":"config"`, `"experiment_id":"nf-`} {
-		if !strings.Contains(got.stderr, want) {
-			t.Fatalf("stderr %q is missing %q", got.stderr, want)
+	records := decodeTrace(t, got.stderr)
+	for _, want := range []string{logging.EventConfigurationValidated} {
+		if len(eventsNamed(records, want)) == 0 {
+			t.Fatalf("stderr %q carries no %q record", got.stderr, want)
 		}
+	}
+	if got := records[len(records)-1].text("component"); got != "config" {
+		t.Errorf("component = %q, want config", got)
+	}
+	if got := records[len(records)-1].text("experiment_id"); !strings.HasPrefix(got, "nf-") {
+		t.Errorf("experiment_id = %q, want the configuration's own", got)
 	}
 }
 
 func TestLogLevelFiltering(t *testing.T) {
-	verbose := execNetforge(t, "", "--log-level=debug", "config", "validate", testdata("valid-minimal.yaml"))
-	if !strings.Contains(verbose.stderr, "command dispatch") {
-		t.Fatalf("stderr %q is missing the debug record", verbose.stderr)
+	verbose := execNetforge(t, "", "--log-level=debug", "--log-format=json",
+		"config", "validate", testdata("valid-minimal.yaml"))
+	if verbose.exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0\nstderr: %s", verbose.exitCode, verbose.stderr)
+	}
+	if len(eventsNamed(decodeTrace(t, verbose.stderr), logging.EventDispatch)) != 1 {
+		t.Fatalf("stderr %q does not carry exactly one %q record", verbose.stderr, logging.EventDispatch)
 	}
 
-	quiet := execNetforge(t, "", "--log-level=error", "config", "validate", testdata("valid-minimal.yaml"))
-	if strings.Contains(quiet.stderr, "configuration validated") {
+	quiet := execNetforge(t, "", "--log-level=error", "--log-format=json",
+		"config", "validate", testdata("valid-minimal.yaml"))
+	if len(eventsNamed(decodeRecords(t, quiet.stderr), logging.EventConfigurationValidated)) != 0 {
 		t.Fatalf("stderr %q contains records below the configured level", quiet.stderr)
 	}
 }
 
 func TestLogLevelFromEnv(t *testing.T) {
-	verbose := execNetforgeEnv(t, "", map[string]string{"NETFORGE_LOG_LEVEL": "debug"},
-		"config", "validate", testdata("valid-minimal.yaml"))
+	verbose := execNetforgeEnv(t, "", map[string]string{
+		"NETFORGE_LOG_LEVEL":  "debug",
+		"NETFORGE_LOG_FORMAT": "json",
+	}, "config", "validate", testdata("valid-minimal.yaml"))
 	if verbose.exitCode != 0 {
 		t.Fatalf("exit code = %d, want 0\nstderr: %s", verbose.exitCode, verbose.stderr)
 	}
-	if !strings.Contains(verbose.stderr, "command dispatch") {
-		t.Fatalf("stderr %q is missing the debug record from the environment", verbose.stderr)
+	if len(eventsNamed(decodeTrace(t, verbose.stderr), logging.EventDispatch)) != 1 {
+		t.Fatalf("stderr %q does not carry the %q record the environment asked for",
+			verbose.stderr, logging.EventDispatch)
 	}
 
-	quiet := execNetforgeEnv(t, "", map[string]string{"NETFORGE_LOG_LEVEL": "error"},
-		"config", "validate", testdata("valid-minimal.yaml"))
+	quiet := execNetforgeEnv(t, "", map[string]string{
+		"NETFORGE_LOG_LEVEL":  "error",
+		"NETFORGE_LOG_FORMAT": "json",
+	}, "config", "validate", testdata("valid-minimal.yaml"))
 	if quiet.exitCode != 0 {
 		t.Fatalf("exit code = %d, want 0", quiet.exitCode)
 	}
-	if strings.Contains(quiet.stderr, "configuration validated") {
+	if len(eventsNamed(decodeRecords(t, quiet.stderr), logging.EventConfigurationValidated)) != 0 {
 		t.Fatalf("stderr %q contains records below the configured level", quiet.stderr)
 	}
 }

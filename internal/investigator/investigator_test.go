@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/probe"
 )
 
 type scriptedProber struct {

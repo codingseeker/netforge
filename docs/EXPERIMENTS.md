@@ -29,15 +29,16 @@ cleanup  take the laboratory apart
 ```
 
 The order is fixed and a step may only be entered from the one before it
-(`internal/experiment/state.go:121`). Nothing is created before the plan exists:
+(`internal/experiment/state.go`). Nothing is created before the plan exists:
 `experiment.Compile` validates the document, the observation against the scope,
 the fault list and every recovery's authorization, and refuses with all of the
-problems joined (`internal/experiment/plan.go:163`). A refusal there happens
+problems joined (`internal/experiment/plan.go`). A refusal there happens
 before a namespace exists.
 
 The engine measures, and it measures before it decides. `diagnose` refuses to
 run at all when the observation shows a path that answered everything, because
-there is nothing to diagnose (`internal/experiment/environment.go:184`).
+there is nothing to diagnose (`LabEnvironment.Diagnose` in
+`internal/experiment/environment.go`).
 
 ## The document
 
@@ -74,7 +75,7 @@ identifier: `nf-router-<id>`, `nf-client0-<id>`, `nf-server0-<id>`. A document
 that grants `client`, `router` and `server` is a valid document — the examples
 in `examples/` are — but it cannot be run, because `network.Create` refuses a
 plan whose namespaces the scope does not grant, before creating anything
-(`internal/network/lab.go:198`). Pass `--id demo` and grant the names that
+(`internal/network/lab.go`). Pass `--id demo` and grant the names that
 identifier produces, as above, or leave `--id` out and grant the names the
 plan's own experiment identifier produces.
 
@@ -111,12 +112,12 @@ lifecycle:
 `plan` has no side effects: it reads a document and prints what the run would do,
 including the time budget, which is `3 × measurement + after-fault + 3 × settle`
 and must fit inside both the engine's own total and the document's
-`max_duration` (`internal/experiment/plan.go:316`).
+`max_duration` (`internal/experiment/plan.go`).
 
 The experiment identifier is derived from the document rather than chosen:
 `nf-` plus the name plus the first four bytes of a SHA-256 over the name, the
 network, every namespace in order, the seed or the absence of one, and every
-limit (`internal/config/experiment.go:10`). Two runs of the same document are the
+limit (`internal/config/experiment.go`). Two runs of the same document are the
 same experiment; changing any of those fields makes it a different one.
 
 ## Running
@@ -162,15 +163,16 @@ metrics:
 The measurement flags are `--namespace`, `--target`, `--port`, `--protocol`,
 `--count`, `--size`, `--timeout`, `--deadline`, `--after-fault` and `--settle`;
 the laboratory flags are `--clients`, `--servers`, `--id`, `--routing`,
-`--service-ports` and `--service-base-port`; the report flags are
-`--output text|json`. Flags come before the path. `netforge help experiment run`
-prints them.
+`--service-ports`, `--service-base-port`, `--balancer` and
+`--balancer-base-port`; the recovery flags are `--recover`, `--recover-from`,
+`--authorize` and `--why`; the report flags are `--output text|json`. Flags come
+before the path. `netforge help experiment run` prints them.
 
 The protocol decides how the observation is taken: `icmp` is measured with the
 kernel's own `ping` and its printed report is parsed
-(`internal/probe/probe.go:367`); `tcp`, `udp`, `dns`, `tls` and `http` are
+(`internal/probe/probe.go`); `tcp`, `udp`, `rudp`, `dns`, `tls` and `http` are
 measured by a probe agent re-executed inside the namespace
-(`internal/probe/engine.go:158`). `icmp` needs no listener, which is why the
+(`internal/probe/engine.go`). `icmp` needs no listener, which is why the
 transcript above uses it against a scope that starts no service.
 
 `--routing software` puts NetForge's own router in the router namespace instead
@@ -179,6 +181,19 @@ first *N* server namespaces so a protocol that needs a listener has one. Both ar
 covered in [OPERATIONS.md](OPERATIONS.md), together with the report's
 `laboratory` block, which names the namespaces, their addresses, the routing mode
 and — when the software router is in use — its counters.
+
+`--balancer N` puts a load balancer in the measured path, in front of the first
+*N* server namespaces, and `--balancer-base-port` says which port it binds: the
+balancer takes the base and the *i*-th backend behind it takes `base+1+i`. The
+base defaults to `--port`, and asking for more backends than `--servers` builds
+is refused rather than quietly reduced. `--balancer` is 0 by default, which builds
+no balancer, and the report then carries no `laboratory.balancer` block. A
+laboratory with no balancer refuses a recovery action that needs one rather than
+pretending to perform it.
+
+`--recover-from` names the namespace an address recovery is verified from. An
+address on its own does not say where the measurement came from, so the flag
+defaults to `--namespace`; give it explicitly when the two differ.
 
 `--output json` writes the same run as a structured document: `name`,
 `experiment_id`, `seed`, `succeeded`, `cleaned_up`, `duration`, `laboratory`,
@@ -298,7 +313,7 @@ rather than a partial success: the outcome in that report reads
 
 and the criteria that judged it are the defaults from
 `recovery.DefaultCriteria`: no loss, at least one reply, an average round trip
-under two seconds (`internal/recovery/verify.go:17`). The whole request set is
+under two seconds (`internal/recovery/verify.go`). The whole request set is
 validated before the first action runs, so a valid request followed by an invalid
 one leaves the laboratory untouched.
 
@@ -314,9 +329,9 @@ Stated rather than discovered:
 
 - What to measure is not in the document. There is no `probes:`, `services:` or
   `diagnosis:` key; the observation and the recovery requests are flags.
-- The load balancer and the MTU are not selectable from the command line. The
-  software router (`--routing software`) and the laboratory's services
-  (`--service-ports`) are, and were not before Phase 14.
+- The MTU is not selectable from the command line. The software router
+  (`--routing software`), the laboratory's services (`--service-ports`) and the
+  load balancer (`--balancer`, `--balancer-base-port`) are.
 - `--protocol dns` is refused from the command line. A DNS observation needs a
   name to ask the resolver about, and the CLI's observation carries none, so a
   resolver started for it would answer nothing. The probe and the service that
@@ -339,9 +354,8 @@ is not deterministic, and is not claimed to be: a fault applied at a percentage
 drops a different set of packets every run, so the observed loss moves and the
 investigator's probes move with it. That is why the transport benchmark records
 one run as one sample of a random fault
-([BENCHMARKS.md](BENCHMARKS.md)) and why the suite that found two flaky tests
-raised their declared thresholds rather than pinning a result
-([todo.md](../todo.md), Phase 12).
+([BENCHMARKS.md](BENCHMARKS.md)) and why the suite raises a declared threshold
+rather than pinning a result that the kernel does not owe it.
 
 The evidence a run leaves is the report and the host state. The report says what
 was measured, what was concluded, what was changed and whether the change was

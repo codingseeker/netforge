@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/cleanup"
-	"github.com/netforge/netforge/internal/logging"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/cleanup"
+	"github.com/codingseeker/netforge/internal/logging"
 )
 
 const ProgramName = "netforge"
@@ -154,14 +154,12 @@ func (a *App) Run(ctx context.Context) error {
 		Logger: logger.With(slog.String(logging.FieldComponent, command.Name)),
 		Stack:  cleanup.New(),
 	}
-	session.Logger.Debug("command dispatch", slog.String(logging.FieldEvent, "dispatch"))
+	session.Logger.Debug(logging.EventDispatch)
 
 	if err := session.Stack.Guard(ctx, func() error {
 		return runCommand(ctx, session, command, args[1:])
 	}); err != nil {
-		session.Logger.Debug("command failed",
-			slog.String(logging.FieldEvent, "command_failed"),
-			slog.String("error", err.Error()))
+		session.Logger.Debug(logging.EventCommandFailed, slog.String("error", err.Error()))
 		return fail(env, err)
 	}
 	return nil

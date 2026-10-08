@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/config"
-	"github.com/netforge/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/config"
+	"github.com/codingseeker/netforge/internal/probe"
 )
 
 func auditDocument(t *testing.T, body string) (*config.Config, error) {

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/investigator"
-	"github.com/netforge/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/investigator"
+	"github.com/codingseeker/netforge/internal/probe"
 )
 
 const (
@@ -330,7 +330,7 @@ func TestAnActionThatDoesNotRecoverIsAFailure(t *testing.T) {
 	}
 }
 
-func testAnUnmeasurablePathIsNotAVerification(t *testing.T) {
+func TestAnUnmeasurablePathIsNotAVerification(t *testing.T) {
 	executor := &fakeExecutor{}
 	prober := &fakeProber{err: apperr.Timeout("test.prober", "the answer never arrived", nil)}
 	recovery, err := New(testScope(t),

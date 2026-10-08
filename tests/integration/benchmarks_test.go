@@ -9,7 +9,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/netforge/netforge/internal/chaos"
+	"github.com/codingseeker/netforge/internal/chaos"
 )
 
 type benchmarkRow struct {
@@ -163,7 +163,7 @@ func benchmarkRevision() string {
 		}
 	}
 	if revision == "" {
-		return "revision unknown: built outside a version control checkout"
+		return "revision unknown: the toolchain stamps no VCS revision into a test binary"
 	}
 	if dirty {
 		return "NetForge at " + revision + " with local modifications"

@@ -3,8 +3,8 @@ package metrics
 import (
 	"time"
 
-	"github.com/netforge/netforge/internal/experiment"
-	"github.com/netforge/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/experiment"
+	"github.com/codingseeker/netforge/internal/probe"
 )
 
 type Metrics struct {
@@ -69,6 +69,7 @@ func FromReport(run experiment.Report) Metrics {
 	addPhases := func(name string, measurements []probe.Measurement) {
 		for _, measurement := range measurements {
 			m.PacketsSent += int64(measurement.Sent)
+			m.Retransmissions += int64(measurement.Retransmitted)
 			m.Bytes += measurement.Bytes
 			sent += int64(measurement.Sent)
 			received += int64(measurement.Received)

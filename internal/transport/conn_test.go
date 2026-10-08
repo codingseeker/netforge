@@ -10,6 +10,7 @@ import (
 	"net"
 	"runtime"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -81,9 +82,7 @@ func dial(t *testing.T, to string, limits Limits) *Conn {
 func connect(t *testing.T, l *Listener, to string, limits Limits) (*Conn, *Conn) {
 	t.Helper()
 
-	client, served := connectSeenAs(t, l, to, "", limits)
-	_ = served
-	return client, served
+	return connectSeenAs(t, l, to, "", limits)
 }
 
 func connectSeenAs(t *testing.T, l *Listener, to, seenAs string, limits Limits) (*Conn, *Conn) {
@@ -419,13 +418,15 @@ func TestAClosedConnectionLeavesNothingRunning(t *testing.T) {
 	}
 	serve(t, l)
 
+	before := runtime.NumGoroutine()
+
 	client, _ := connect(t, l, l.socket.LocalAddr().String(), limits)
 	if err := client.Close(); err != nil {
 		t.Fatalf("Close() = %v, want nil", err)
 	}
-	before := runtime.NumGoroutine()
+	assertFinished(t, "the client connection", client)
 
-	for range 8 {
+	for round := range 8 {
 		conn, _ := connect(t, l, l.socket.LocalAddr().String(), limits)
 		roundTrip(t, conn, "payload in flight")
 		if err := conn.Close(); err != nil {
@@ -434,16 +435,57 @@ func TestAClosedConnectionLeavesNothingRunning(t *testing.T) {
 		if err := conn.Close(); err != nil {
 			t.Fatalf("Close() again = %v, want nil: closing twice is safe", err)
 		}
+		assertFinished(t, "connection "+strconv.Itoa(round), conn)
+	}
+
+	if !awaitHeld(t, l, 0) {
+		held, _ := l.Count()
+		t.Errorf("the listener still holds %d connections after every client was closed", held)
 	}
 
 	if err := l.Close(); err != nil {
 		t.Fatalf("Close() of the listener = %v, want nil", err)
 	}
-	after := runtime.NumGoroutine()
-	if after > before {
-		t.Errorf("goroutines went from %d to %d, want no more than before", before, after)
+	if held, _ := l.Count(); held != 0 {
+		t.Errorf("the listener still holds %d connections after it was closed", held)
 	}
-	_ = l.Conn
+
+	settled, after := false, 0
+	for range 200 {
+		after = runtime.NumGoroutine()
+		if after <= before {
+			settled = true
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if !settled {
+		t.Errorf("goroutines went from %d to %d and did not settle, want no more than before", before, after)
+	}
+}
+
+func assertFinished(t *testing.T, what string, conn *Conn) {
+	t.Helper()
+	select {
+	case <-conn.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s is still running two seconds after it was closed", what)
+	}
+}
+
+func awaitHeld(t *testing.T, l *Listener, want int) bool {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		held, _ := l.Count()
+		if held == want {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func TestClosingIsSafeFromEitherDirection(t *testing.T) {

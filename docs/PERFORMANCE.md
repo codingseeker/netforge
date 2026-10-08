@@ -44,7 +44,7 @@ How it is measured:
   network namespace without taking its own threads with it, so the parent
   re-executes the test binary with `-test.run=^TestTransportBenchmarkChild$` and
   reads one `RESULT` line per transport
-  (`tests/integration/transport_test.go:281`).
+  (`tests/integration/transport_test.go`).
 - The fault is applied by the kernel with `netem` on the client end of the link.
   A userspace proxy that dropped bytes from a TCP stream would corrupt the stream
   rather than model packet loss, so TCP would never retransmit what the proxy
@@ -61,7 +61,7 @@ How it is measured:
 - Every result is checked before it is recorded: exactly 262144 bytes offered, no
   delivery beyond what was sent, and the reliable transport required to have
   delivered all of it (`checkMeasurement`,
-  `tests/integration/transport_test.go:340`).
+  `tests/integration/transport_test.go`).
 
 The six conditions are an unimpaired path, 1%, 5% and 10% packet loss, 60ms of
 added latency, and 40ms of latency with 30ms of jitter.
@@ -95,7 +95,7 @@ under loss is a run the path happened not to impair.
 ## The metrics a run reports
 
 An experiment report carries ten derived metrics
-(`internal/metrics/metrics.go:17`). Each is computed from the measurements of the
+(`internal/metrics/metrics.go`). Each is computed from the measurements of the
 run, never from a configured value:
 
 | metric | how it is derived |
@@ -105,7 +105,7 @@ run, never from a configured value:
 | `rtt.min` / `rtt.max` | smallest `min_rtt` and largest `max_rtt` |
 | `rtt.average` | reply-count-weighted mean of `average_rtt`, over the measurements that had replies |
 | `packet_loss` | recomputed from the counts of the observe phase, never read from the measurement |
-| `retransmissions` | always zero for echo measurements, which have no transport to retransmit on |
+| `retransmissions` | sum of `retransmitted` over every measurement, read from the transport's own counter; zero for echo measurements, which have no transport to retransmit on |
 | `throughput` | the largest `goodput` of any measurement |
 | `connection_failures` | measurements that sent something and received nothing |
 | `availability` | `100 - packet_loss` |
@@ -129,7 +129,7 @@ inside a teardown.
 An individual measurement carries what the kernel reported, not what NetForge
 hoped for: `sent`, `received`, `loss`, `min_rtt`, `average_rtt`, `max_rtt`,
 `deviation_rtt`, `duplicates`, `errors`, `out_of_order`, `bytes`, `duration` and
-`goodput` (`internal/probe/probe.go:177`). An unparsable `ping` report is an
+`goodput` (`internal/probe/probe.go`). An unparsable `ping` report is an
 error, never a zero, and a report that shows replies but no round trip line is an
 error rather than a measurement of nothing.
 
@@ -140,7 +140,7 @@ through a file written to a temporary name and renamed into place, so a reader
 never sees half a document.
 
 The software router writes `<state root>/netforge-router-*/router.json`
-(`internal/router/counters.go:31`): `revision`, `state`, `error`, `lastError`,
+(`internal/router/counters.go`): `revision`, `state`, `error`, `lastError`,
 `received`, `forwarded`, `bytes`, `ignored`, `local`, `malformed`, `noRoute`,
 `ttlExceeded`, `oversize`, `unreachable`, `arpRequests`, `arpReplies`,
 `arpProbes`, `unresolved`, `queueFull`, `sendErrors`, `queueDepth`, `queueSize`,
@@ -154,7 +154,7 @@ something `netforge reconcile list` can identify and `reconcile reclaim` can
 remove; see [OPERATIONS.md](OPERATIONS.md).
 
 The reliable transport reports its own numbers about the path rather than a
-configured value (`internal/transport/congestion.go:204`): window, ceiling,
+configured value (`internal/transport/congestion.go`, `snapshot`): window, ceiling,
 whether it is in slow start, whether it is in recovery, timeouts, round trip,
 smoothed round trip, jitter, and whether a round trip was ever measured. The
 connection additionally counts sent, acknowledged, retransmitted, received,
@@ -164,14 +164,14 @@ dropped, buffered and waiting. Those counters are what the benchmark's
 for the other two rows.
 
 The load balancer writes a status file
-(`internal/loadbalancer/agent.go:38`): `state`, `listen`, `policy`, and per
+(`internal/loadbalancer/agent.go`): `state`, `listen`, `policy`, and per
 backend `address`, `state` (`healthy`, `draining`, `removed`), `active`,
 `accepted`, `skipped`, `checks`, `failed_checks`, `consecutive_failures`,
 `recoveries`, `forwarded_bytes`, `returned_bytes`, `drained_connections`,
 `latency`, `last_checked` and `last_error`. Health checks run every 500ms with a
 250ms per-check bound, and two consecutive failures take a backend out of service
 while two consecutive successes bring it back
-(`internal/loadbalancer/limits.go:44`).
+(`internal/loadbalancer/limits.go`).
 
 ## Properties measured as limits rather than as figures
 
@@ -189,10 +189,10 @@ numbers, and a test is what holds them in place:
 - The reliable transport: a payload ceiling of 1380 bytes, a window ceiling, a
   retransmit-attempt ceiling after which the connection is abandoned, and a
   kernel socket buffer sized so the kernel cannot queue frames the transport
-  must then refuse (`internal/transport/conn.go:166`).
+  must then refuse (`internal/transport/conn.go`).
 - The chaos engine: a fault becomes `active` only once the kernel's own `tc -j
   qdisc show` numbers match what was asked for
-  (`internal/chaos/tc.go:306`), so a reported fault is one the kernel installed.
+  (`internal/chaos/tc.go`), so a reported fault is one the kernel installed.
 - The laboratory itself: services are ready when their status file says every
   listener is bound, the router is ready when its statistics file says
   `running`, and both waits are bounded (5s and 3s).

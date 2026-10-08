@@ -10,13 +10,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/chaos"
-	"github.com/netforge/netforge/internal/cleanup"
-	"github.com/netforge/netforge/internal/iface"
-	"github.com/netforge/netforge/internal/namespace"
-	"github.com/netforge/netforge/internal/probe"
-	"github.com/netforge/netforge/internal/reconcile"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/chaos"
+	"github.com/codingseeker/netforge/internal/cleanup"
+	"github.com/codingseeker/netforge/internal/iface"
+	"github.com/codingseeker/netforge/internal/loadbalancer"
+	"github.com/codingseeker/netforge/internal/namespace"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/reconcile"
 )
 
 type Spec struct {
@@ -37,6 +38,15 @@ type Spec struct {
 	Faults []chaos.Spec
 
 	Services []ServiceSpec
+	Balancer *BalancerSpec
+}
+
+type BalancerSpec struct {
+	Namespace string
+	Listen    string
+	Backends  []string
+	Policy    loadbalancer.Policy
+	Limits    loadbalancer.Limits
 }
 
 type Routing string
@@ -86,6 +96,7 @@ type Lab struct {
 	declared []chaos.Fault
 
 	experiment string
+	balancer   *balancerProcess
 }
 
 func Create(ctx context.Context, spec Spec) (*Lab, error) {
@@ -95,6 +106,12 @@ func Create(ctx context.Context, spec Spec) (*Lab, error) {
 	plan, err := BuildPlan(spec.ID, spec.Network, spec.Clients, spec.Servers, spec.MTU)
 	if err != nil {
 		return nil, err
+	}
+	if spec.Balancer != nil {
+		plan, err = AddBalancer(plan)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := enforceScope(spec, plan); err != nil {
 		return nil, err
@@ -153,6 +170,10 @@ func Create(ctx context.Context, spec Spec) (*Lab, error) {
 		_ = lab.stack.Run(ctx)
 		return nil, err
 	}
+	if err := lab.startBalancer(); err != nil {
+		_ = lab.stack.Run(ctx)
+		return nil, err
+	}
 	if err := lab.startFaults(ctx); err != nil {
 		_ = lab.stack.Run(ctx)
 		return nil, err
@@ -171,8 +192,22 @@ func checkSpec(spec Spec) error {
 		return apperr.InvalidArgument(op,
 			"routing "+string(spec.Routing)+" is unknown, want "+string(RoutingSoftware)+" or kernel forwarding", nil)
 	}
+	if spec.Balancer != nil {
+		if spec.Balancer.Namespace == "" {
+			return apperr.InvalidArgument(op, "a balancer needs a namespace to run in", nil)
+		}
+		if spec.Balancer.Listen == "" {
+			return apperr.InvalidArgument(op, "a balancer needs an address to listen on", nil)
+		}
+		if len(spec.Balancer.Backends) == 0 {
+			return apperr.InvalidArgument(op, "a balancer needs at least one backend to distribute to", nil)
+		}
+	}
 	if spec.MaxNames > 0 {
 		needed := spec.Clients + spec.Servers + 1
+		if spec.Balancer != nil {
+			needed++
+		}
 		if needed > spec.MaxNames {
 			return apperr.LimitExceeded(op,
 				"the laboratory needs "+strconv.Itoa(needed)+" namespaces but limits.max_namespaces is "+strconv.Itoa(spec.MaxNames), nil)
@@ -180,6 +215,9 @@ func checkSpec(spec Spec) error {
 	}
 	if spec.MaxIfs > 0 {
 		needed := 2 * (spec.Clients + spec.Servers)
+		if spec.Balancer != nil {
+			needed += 2
+		}
 		if needed > spec.MaxIfs {
 			return apperr.LimitExceeded(op,
 				"the laboratory needs "+strconv.Itoa(needed)+" interfaces but limits.max_interfaces is "+strconv.Itoa(spec.MaxIfs), nil)

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/netforge/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/probe"
 )
 
 const (
@@ -318,27 +318,6 @@ func summarise(report *Report, body string) string {
 		return fmt.Sprintf("%s: the evidence does not support a conclusion.", report.Diagnosis)
 	}
 	return report.Diagnosis.String() + ": " + body
-}
-
-var order = map[string]int{
-	layerNetwork:   0,
-	layerRouting:   1,
-	layerTransport: 2,
-	layerDNS:       3,
-	layerTLS:       4,
-	layerHTTP:      5,
-}
-
-func belowLayer(lower, higher string) bool {
-	low, ok := order[lower]
-	if !ok {
-		return false
-	}
-	high, ok := order[higher]
-	if !ok {
-		return false
-	}
-	return low < high
 }
 
 func impairment(evidence []Evidence, limits Limits) *Evidence {

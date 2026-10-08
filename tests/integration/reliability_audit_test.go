@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/chaos"
-	"github.com/netforge/netforge/internal/network"
-	"github.com/netforge/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/chaos"
+	"github.com/codingseeker/netforge/internal/network"
+	"github.com/codingseeker/netforge/internal/probe"
 )
 
 const (

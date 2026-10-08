@@ -1,7 +1,6 @@
 package chaos
 
 import (
-	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -184,12 +183,4 @@ func parseBits(value string) uint64 {
 		return 0
 	}
 	return parsed * multiplier
-}
-
-func renderState(entries ...map[string]any) string {
-	data, err := json.Marshal(entries)
-	if err != nil {
-		return ""
-	}
-	return string(data)
 }

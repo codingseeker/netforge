@@ -15,8 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/packet"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/packet"
+	"github.com/codingseeker/netforge/internal/transport"
 )
 
 type AgentPayload struct {
@@ -89,6 +90,8 @@ func Probe(ctx context.Context, payload AgentPayload) Result {
 		err = probeTLS(runCtx, request, payload, &result)
 	case ProtocolHTTP:
 		err = probeHTTP(runCtx, request, payload, &result)
+	case ProtocolRUDP:
+		err = probeRUDP(runCtx, request, payload, &result)
 	case ProtocolICMP:
 		err = apperr.Unsupported("probe.Probe",
 			"an echo probe is measured by the kernel's own tool, not by this agent", nil)
@@ -480,4 +483,69 @@ func Classify(err error) Failure {
 	}
 
 	return FailureUnknown
+}
+
+func probeRUDP(ctx context.Context, request Request, payload AgentPayload, result *Result) error {
+	size := request.Payload
+	if size <= 0 {
+		size = 32
+	}
+	if size > payload.MaxPayload {
+		size = payload.MaxPayload
+	}
+	limits := RUDPLimits(payload.MaxPayload)
+	conn, err := transport.Dial(ctx, "", address(request), limits)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+
+	start := time.Now()
+	_, writeErr := conn.Write(ctx, bytes.Repeat([]byte{0x5a}, size))
+	var answer []byte
+	var readErr error
+	if writeErr == nil {
+		answer, readErr = conn.Read(ctx)
+	}
+	result.RTT = time.Since(start)
+
+	counters := conn.Counters()
+	result.Sent = counters.Sent
+	result.Received = counters.Received
+	result.Retransmitted = counters.Retransmitted
+	if counters.Sent > 0 {
+		unacknowledged := counters.Sent - counters.Acknowledged
+		if unacknowledged < 0 {
+			unacknowledged = 0
+		}
+		result.Loss = float64(unacknowledged) * 100 / float64(counters.Sent)
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	if readErr != nil {
+		result.Detail = "the transport gave up after " +
+			strconv.Itoa(counters.Retransmitted) + " retransmissions: " + readErr.Error()
+		return readErr
+	}
+	if len(answer) > payload.MaxResponseSize {
+		result.ResponseSize = payload.MaxResponseSize
+		result.Truncated = true
+	} else {
+		result.ResponseSize = len(answer)
+	}
+	result.Detail = strconv.Itoa(len(answer)) + " bytes"
+	return nil
+}
+
+func (r Result) Diagnostics() (int, bool) { return r.Retransmitted, true }
+
+func RUDPLimits(maxPayload int) transport.Limits {
+	return transport.Limits{
+		MaxConnections: 2,
+		MaxPayload:     min(max(maxPayload, 32), int(transport.MaxPayloadSize)),
+		MaxWindow:      transport.DefaultLimits().MaxWindow,
+		MaxDatagram:    transport.MaxFrameSize,
+		IdleTimeout:    10 * time.Second,
+	}
 }

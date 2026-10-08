@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 var ErrClosed = errors.New("the connection is closed")

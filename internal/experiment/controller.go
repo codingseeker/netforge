@@ -2,14 +2,17 @@ package experiment
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/chaos"
-	"github.com/netforge/netforge/internal/investigator"
-	"github.com/netforge/netforge/internal/probe"
-	"github.com/netforge/netforge/internal/recovery"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/chaos"
+	"github.com/codingseeker/netforge/internal/investigator"
+	"github.com/codingseeker/netforge/internal/logging"
+	"github.com/codingseeker/netforge/internal/network"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/recovery"
 )
 
 type Environment interface {
@@ -82,8 +85,121 @@ type Controller struct {
 	env   Environment
 	clock func() time.Time
 
+	log *slog.Logger
+
 	mu    chan struct{}
 	state State
+}
+
+func (c *Controller) WithLogger(logger *slog.Logger) *Controller {
+	c.log = logger
+	return c
+}
+
+func (c *Controller) trace(event string, attrs ...slog.Attr) {
+	if c.log == nil {
+		return
+	}
+	fields := make([]any, 0, len(attrs))
+	for _, attr := range attrs {
+		fields = append(fields, attr)
+	}
+	c.log.Debug(event, fields...)
+}
+
+type Summarizer interface {
+	Summary() *network.Summary
+}
+
+func (c *Controller) traceNamespaces() {
+	summarizer, ok := c.env.(Summarizer)
+	if !ok {
+		return
+	}
+	summary := summarizer.Summary()
+	if summary == nil {
+		return
+	}
+	for _, node := range summary.Nodes {
+		c.trace(logging.EventNamespace,
+			slog.String("namespace", node.Namespace),
+			slog.String("role", node.Role))
+	}
+	if summary.RouterNamespace != "" {
+		c.trace(logging.EventNamespace,
+			slog.String("namespace", summary.RouterNamespace),
+			slog.String("role", "router"))
+	}
+	if summary.Balancer != nil {
+		c.trace(logging.EventNamespace,
+			slog.String("namespace", summary.Balancer.Namespace),
+			slog.String("role", "balancer"))
+	}
+	for _, entry := range summary.Services {
+		c.trace(logging.EventNamespace,
+			slog.String("namespace", entry.Namespace),
+			slog.String("role", "service"))
+	}
+}
+
+func (c *Controller) traceFaults(faults []chaos.Fault) {
+	for _, fault := range faults {
+		c.trace(logging.EventFaultApplied,
+			slog.String("fault_id", fault.ID),
+			slog.String("type", string(fault.Kind)),
+			slog.String("target", fault.Target.String()),
+			slog.String("direction", fault.Direction.String()),
+			slog.String("status", string(fault.Status)))
+	}
+}
+
+func (c *Controller) traceRecoveries(outcomes []recovery.Outcome) {
+	for _, outcome := range outcomes {
+		action := outcome.Authorization.Action()
+		target := outcome.Authorization.Target()
+		c.trace(logging.EventAction,
+			slog.String("action", action.String()),
+			slog.String("target", target),
+			slog.String("from", outcome.Authorization.From()),
+			slog.String("reason", outcome.Authorization.Reason()))
+		if action == recovery.ActionRemoveFault {
+			c.trace(logging.EventFaultRemoved,
+				slog.String("action", action.String()),
+				slog.String("target", target))
+		}
+	}
+}
+
+func stageEvent(state State) string {
+	switch state {
+	case StateSetup:
+		return logging.EventStageSetup
+	case StateBaseline:
+		return logging.EventStageBaseline
+	case StateFault:
+		return logging.EventStageFault
+	case StateObserve:
+		return logging.EventStageObserve
+	case StateDiagnose:
+		return logging.EventStageDiagnose
+	case StateRecover:
+		return logging.EventStageRecover
+	case StateVerify:
+		return logging.EventStageVerify
+	case StateReport:
+		return logging.EventStageReport
+	case StateCleanup:
+		return logging.EventStageCleanup
+	default:
+		return logging.EventStageUnknown
+	}
+}
+
+func messageOf(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func New(plan Plan, env Environment, now time.Time) (*Controller, error) {
@@ -161,23 +277,42 @@ func (c *Controller) Run(ctx context.Context) (Report, error) {
 			switch step.State {
 			case StateSetup:
 				err = c.env.Setup(ctx)
+				if err == nil {
+					c.traceNamespaces()
+				}
 			case StateBaseline:
 				report.Baseline, err = c.env.Baseline(ctx)
 			case StateFault:
 				report.Faults, err = c.env.ApplyFaults(ctx)
+				if err == nil {
+					c.traceFaults(report.Faults)
+				}
 			case StateObserve:
 				report.Observed, err = c.env.Observe(ctx)
 			case StateDiagnose:
 				if err = c.requireObserved(report); err == nil {
 					report.Diagnosis, err = c.env.Diagnose(ctx, report.Observed)
+					if err == nil {
+						c.trace(logging.EventDiagnosis,
+							slog.String("classification", string(report.Diagnosis.Diagnosis)),
+							slog.String("layer", report.Diagnosis.Layer),
+							slog.String("rule", report.Diagnosis.Rule),
+							slog.Int("evidence", len(report.Diagnosis.Evidence)))
+					}
 				}
 			case StateRecover:
 				report.Recoveries, record.Recovery, err = c.recover(ctx)
+				c.traceRecoveries(report.Recoveries)
 				if err == nil {
 					report.Recommendation = recovery.Propose(report.Diagnosis)
 				}
 			case StateVerify:
 				report.Verified, err = c.verify(ctx)
+				event := logging.EventVerifiedPass
+				if err != nil {
+					event = logging.EventVerifiedFailed
+				}
+				c.trace(event, slog.Int("measurements", len(report.Verified)), slog.String("error", messageOf(err)))
 			case StateReport:
 
 			case StateCleanup:
@@ -187,6 +322,11 @@ func (c *Controller) Run(ctx context.Context) (Report, error) {
 		}
 		record.Duration = c.clock().Sub(record.Started)
 		record.Err = err
+		c.trace(stageEvent(step.State),
+			slog.String("state", step.State.String()),
+			slog.String("detail", step.Detail),
+			slog.String("duration", record.Duration.String()),
+			slog.String("error", messageOf(err)))
 		report.Steps = append(report.Steps, record)
 		if err != nil {
 			failure = err
@@ -204,6 +344,11 @@ func (c *Controller) Run(ctx context.Context) (Report, error) {
 		cancel()
 		cleanup.Duration = c.clock().Sub(cleanup.Started)
 		cleanup.Err = err
+		c.trace(logging.EventStageCleanup,
+			slog.String("state", StateCleanup.String()),
+			slog.String("detail", cleanup.Detail),
+			slog.String("duration", cleanup.Duration.String()),
+			slog.String("error", messageOf(err)))
 		report.Steps = append(report.Steps, cleanup)
 		report.CleanedUp = err == nil
 		if err != nil && failure == nil {

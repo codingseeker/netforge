@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/namespace"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/namespace"
 )
 
 type Kind string
@@ -283,13 +284,23 @@ func Identified(entries []Entry) []Entry {
 
 func Scan(root string, now time.Time) ([]Entry, error) {
 	const op = "reconcile.Scan"
-	entries, err := os.ReadDir(root)
+	limit := DefaultLimits().MaxEntries
+	directory, err := os.Open(root)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 
 			return nil, nil
 		}
 		return nil, apperr.IO(op, "the state root "+root+" could not be listed", err)
+	}
+	defer func() { _ = directory.Close() }()
+	entries, err := directory.ReadDir(limit + 1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, apperr.IO(op, "the state root "+root+" could not be listed", err)
+	}
+	if len(entries) > limit {
+		return nil, apperr.LimitExceeded(op, "the state root "+root+" holds more than "+
+			strconv.Itoa(limit)+" entries and one listing reads at most that many", nil)
 	}
 	out := make([]Entry, 0, len(entries))
 	for _, entry := range entries {

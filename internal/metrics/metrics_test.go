@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/experiment"
-	"github.com/netforge/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/experiment"
+	"github.com/codingseeker/netforge/internal/probe"
 )
 
 func sampleMeasurement(sent, received int, rtt time.Duration, bytes int64, goodput uint64) probe.Measurement {

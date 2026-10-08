@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/chaos"
-	"github.com/netforge/netforge/internal/experiment"
-	"github.com/netforge/netforge/internal/investigator"
-	"github.com/netforge/netforge/internal/probe"
-	"github.com/netforge/netforge/internal/recovery"
+	"github.com/codingseeker/netforge/internal/chaos"
+	"github.com/codingseeker/netforge/internal/experiment"
+	"github.com/codingseeker/netforge/internal/investigator"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/recovery"
 )
 
 func sampleMeasurement(sent, received int, rtt time.Duration, bytes int64) probe.Measurement {
@@ -172,6 +172,12 @@ func TestEncodeJSONRoundTrips(t *testing.T) {
 	if len(decoded.Steps) != len(report.Steps) || decoded.Steps[5].Recovery != "remove_fault" {
 		t.Errorf("the round-trip changed the lifecycle")
 	}
+	if decoded.Recommendation != report.Recommendation {
+		t.Errorf("the round-trip changed the recommendation:\n%+v\n%+v", decoded.Recommendation, report.Recommendation)
+	}
+	if !decoded.Recommendation.Diagnosed || decoded.Recommendation.Statement == "" {
+		t.Errorf("the round-trip lost the recommendation: %+v", decoded.Recommendation)
+	}
 
 	if strings.Contains(buf.String(), `"error"`) {
 		t.Errorf("a successful run was encoded with an error field:\n%s", buf.String())
@@ -211,7 +217,6 @@ func TestEncodeTextNamesTheRunAndEveryMetric(t *testing.T) {
 
 func TestEncodeTextReportsAFailedRun(t *testing.T) {
 	run := sampleRun(t)
-	run.Succeeded()
 	run.Steps[len(run.Steps)-1].Err = errors.New("the verification found loss")
 	run.Err = errors.New("the verification found loss")
 	run.Failed = experiment.StateVerify
@@ -222,5 +227,154 @@ func TestEncodeTextReportsAFailedRun(t *testing.T) {
 	text := buf.String()
 	if !strings.Contains(text, "result: failed in verify") || !strings.Contains(text, "the verification found loss") {
 		t.Errorf("a failed run is not reported as failed:\n%s", text)
+	}
+}
+
+func TestBothFormatsCarryTheRecommendation(t *testing.T) {
+	run := sampleRun(t)
+	run.Diagnosis = investigator.Report{
+		Diagnosis: investigator.Probable,
+		Layer:     "network",
+		Summary:   "the path to the target is impaired rather than broken",
+		Rule:      "degraded-path",
+		Observation: investigator.Observation{
+			Namespace: "nf-client0-x",
+			Target:    "10.42.0.6",
+		},
+	}
+	run.Recommendation = recovery.Propose(run.Diagnosis)
+	if run.Recommendation.Action == "" {
+		t.Fatal("the diagnosis proposes no action, so the test would prove nothing")
+	}
+
+	var jsonBuf bytes.Buffer
+	if err := EncodeJSON(&jsonBuf, run, nil); err != nil {
+		t.Fatalf("EncodeJSON: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(jsonBuf.Bytes(), &raw); err != nil {
+		t.Fatalf("the report is not JSON: %v", err)
+	}
+	carried, present := raw["recommendation"]
+	if !present {
+		t.Fatal("the JSON report has no recommendation key at all")
+	}
+	fields, ok := carried.(map[string]any)
+	if !ok {
+		t.Fatalf("the recommendation is %T, want an object", carried)
+	}
+	if fields["diagnosed"] != true {
+		t.Errorf("the recommendation is not marked diagnosed: %+v", fields)
+	}
+	if fields["flag"] != "-recover remove_fault:nf-client0-x" {
+		t.Errorf("the recommendation renders flag %v, want the -recover flag", fields["flag"])
+	}
+	if fields["from"] != "nf-client0-x" {
+		t.Errorf("the recommendation names from %v, want the namespace the probes ran in", fields["from"])
+	}
+	if statement, _ := fields["statement"].(string); statement == "" {
+		t.Error("the recommendation carries no statement")
+	}
+
+	var textBuf bytes.Buffer
+	if err := EncodeText(&textBuf, run, nil); err != nil {
+		t.Fatalf("EncodeText: %v", err)
+	}
+	text := textBuf.String()
+	for _, want := range []string{
+		"recommendation:",
+		"diagnosed: true",
+		"-recover remove_fault:nf-client0-x",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the text report does not carry %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestARunThatDiagnosedNothingSaysSo(t *testing.T) {
+	run := sampleRun(t)
+	run.Diagnosis = investigator.Report{Diagnosis: investigator.Unknown}
+	run.Recommendation = recovery.Propose(run.Diagnosis)
+
+	var buf bytes.Buffer
+	if err := EncodeJSON(&buf, run, nil); err != nil {
+		t.Fatalf("EncodeJSON: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("the report is not JSON: %v", err)
+	}
+	carried, present := raw["recommendation"]
+	if !present {
+		t.Fatal("a run that diagnosed nothing omitted the recommendation key instead of saying so")
+	}
+	fields, ok := carried.(map[string]any)
+	if !ok {
+		t.Fatalf("the recommendation is %T, want an object", carried)
+	}
+	if fields["diagnosed"] != false {
+		t.Errorf("a run that diagnosed nothing is marked diagnosed: %+v", fields)
+	}
+	if statement, _ := fields["statement"].(string); !strings.Contains(statement, "nothing was diagnosed") {
+		t.Errorf("the statement %q does not say that nothing was diagnosed", statement)
+	}
+	if _, present := fields["flag"]; present {
+		t.Errorf("a run with no recommendation still offers a flag: %+v", fields)
+	}
+
+	var textBuf bytes.Buffer
+	if err := EncodeText(&textBuf, run, nil); err != nil {
+		t.Fatalf("EncodeText: %v", err)
+	}
+	if !strings.Contains(textBuf.String(), "diagnosed: false") {
+		t.Errorf("the text report does not say that nothing was diagnosed:\n%s", textBuf.String())
+	}
+}
+
+func TestADiagnosedRunWithNoRepairSaysThatToo(t *testing.T) {
+	run := sampleRun(t)
+	run.Diagnosis = investigator.Report{Diagnosis: investigator.Confirmed, Layer: "link"}
+	run.Recommendation = recovery.Propose(run.Diagnosis)
+	if run.Recommendation.Action != "" {
+		t.Fatal("the link layer proposes an action, so the test would prove nothing")
+	}
+	report := FromExperiment(run, nil)
+	if !report.Recommendation.Diagnosed {
+		t.Error("a confirmed diagnosis is not marked diagnosed")
+	}
+	if !strings.Contains(report.Recommendation.Statement, "no authorized repair") {
+		t.Errorf("the statement %q does not say that the evidence names no repair", report.Recommendation.Statement)
+	}
+	if report.Recommendation.Flag != "" {
+		t.Errorf("a report with no recommendation still offers the flag %q", report.Recommendation.Flag)
+	}
+}
+
+func TestTheRenderedRecommendationIsAFlagTheCommandLineAccepts(t *testing.T) {
+	run := sampleRun(t)
+	run.Diagnosis = investigator.Report{
+		Diagnosis:   investigator.Probable,
+		Layer:       "network",
+		Summary:     "the path is impaired",
+		Observation: investigator.Observation{Namespace: "nf-client0-x", Target: "10.42.0.6"},
+	}
+	run.Recommendation = recovery.Propose(run.Diagnosis)
+
+	report := FromExperiment(run, nil)
+	rendered := report.Recommendation.Flag
+	rest, found := strings.CutPrefix(rendered, "-recover ")
+	if !found {
+		t.Fatalf("the recommendation %q is not a -recover flag", rendered)
+	}
+	action, target, found := strings.Cut(rest, ":")
+	if !found || action == "" || target == "" {
+		t.Fatalf("the recommendation %q is not action:target", rendered)
+	}
+	if action != "remove_fault" || target != "nf-client0-x" {
+		t.Errorf("the recommendation parses as %q on %q", action, target)
+	}
+	if got := recovery.Action(action).String(); got != action {
+		t.Errorf("the recommended action %q is not one this build performs, it reads back as %q", action, got)
 	}
 }

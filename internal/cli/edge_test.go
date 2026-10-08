@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 func TestAppAppliesEnvDefaults(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 type Protocol string
@@ -23,17 +23,21 @@ const (
 	ProtocolTLS Protocol = "tls"
 
 	ProtocolHTTP Protocol = "http"
+	ProtocolRUDP Protocol = "rudp"
 )
 
 func Protocols() []Protocol {
-	return []Protocol{ProtocolICMP, ProtocolTCP, ProtocolUDP, ProtocolDNS, ProtocolTLS, ProtocolHTTP}
+	return []Protocol{
+		ProtocolICMP, ProtocolTCP, ProtocolUDP,
+		ProtocolDNS, ProtocolTLS, ProtocolHTTP, ProtocolRUDP,
+	}
 }
 
 func (p Protocol) Valid() bool { return slices.Contains(Protocols(), p) }
 
 func (p Protocol) CarriesApplicationData() bool {
 	switch p {
-	case ProtocolDNS, ProtocolTLS, ProtocolHTTP:
+	case ProtocolDNS, ProtocolTLS, ProtocolHTTP, ProtocolRUDP:
 		return true
 	default:
 		return false
@@ -44,7 +48,7 @@ func (p Protocol) Layer() string {
 	switch p {
 	case ProtocolDNS:
 		return "dns"
-	case ProtocolTCP, ProtocolUDP:
+	case ProtocolTCP, ProtocolUDP, ProtocolRUDP:
 		return "transport"
 	case ProtocolTLS:
 		return "tls"
@@ -122,6 +126,8 @@ type Result struct {
 	Sent     int     `json:"sent,omitempty"`
 	Received int     `json:"received,omitempty"`
 	Loss     float64 `json:"loss,omitempty"`
+
+	Retransmitted int `json:"retransmitted,omitempty"`
 
 	Truncated bool `json:"truncated,omitempty"`
 
@@ -218,6 +224,11 @@ func (r Request) check(op string, limits Limits, scope Scope) (Request, error) {
 			r.Port = 443
 		}
 		r.Path, r.Payload, r.ExpectStatus = "", 0, 0
+	case ProtocolRUDP:
+		if r.Port == 0 {
+			return r, apperr.InvalidArgument(op, "a rudp probe needs a port", nil)
+		}
+		r.Name, r.Path, r.ExpectStatus, r.Payload = "", "", 0, 0
 	case ProtocolHTTP:
 		if r.Port == 0 {
 			r.Port = 80
@@ -265,7 +276,7 @@ func (r Request) check(op string, limits Limits, scope Scope) (Request, error) {
 
 func (p Protocol) UsesPort() bool {
 	switch p {
-	case ProtocolTCP, ProtocolUDP, ProtocolDNS, ProtocolTLS, ProtocolHTTP:
+	case ProtocolTCP, ProtocolUDP, ProtocolDNS, ProtocolTLS, ProtocolHTTP, ProtocolRUDP:
 		return true
 	default:
 		return false

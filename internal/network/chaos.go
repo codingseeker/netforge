@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/chaos"
-	"github.com/netforge/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/chaos"
+	"github.com/codingseeker/netforge/internal/probe"
 )
 
 func (l *Lab) Chaos() *chaos.Engine { return l.faults }

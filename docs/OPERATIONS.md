@@ -17,7 +17,7 @@ builds is in [NETWORK_MODEL.md](NETWORK_MODEL.md). The security posture is in
 | unprivileged user namespaces | NetForge creates a user namespace and is uid 0 inside it, which is how it needs no root | the network suites skip with `unprivileged user namespaces are unavailable`; everything else still runs |
 | `ip` on `PATH` | every link, address and route operation | the laboratory cannot be built |
 | `tc` on `PATH` | every fault, and reading a fault back | faults are refused; a run without `faults:` still works |
-| `ping` on `PATH` | the ICMP measurement | any `icmp` observation fails; the five agent protocols do not need it |
+| `ping` on `PATH` | the ICMP measurement | any `icmp` observation fails; the six agent protocols do not need it |
 
 NetForge resolves those helpers through the fixed `PATH` its namespace agent
 gives every child (`/usr/sbin:/usr/bin:/sbin:/bin`), never through a shell and
@@ -91,6 +91,53 @@ with exit 2 rather than ignoring it. Logs go to standard error, reports go to
 standard output, so `netforge experiment run … --output json > report.json` keeps
 the report clean.
 
+### The event names a log record can carry
+
+A record's message is its event name, and the name comes from a closed set: there
+is no other place in NetForge that decides what a log line is called, so a record
+can be asserted on by its name rather than matched as text. Every record carries
+exactly one `event` key, and every record of a run after the first carries that
+run's `experiment_id`.
+
+| event | written when |
+| --- | --- |
+| `dispatch` | a command has been resolved, before it runs |
+| `command_failed` | the command returned an error |
+| `stage_setup`, `stage_baseline`, `stage_fault`, `stage_observe`, `stage_diagnose`, `stage_recover`, `stage_verify`, `stage_report`, `stage_cleanup` | one lifecycle stage has finished; each carries its `state`, `detail`, `duration` and `error` |
+| `namespace_created` | the laboratory created a namespace; carries `namespace` and `role` |
+| `fault_applied`, `fault_removed` | a fault entered or left the laboratory; carries `fault_id`, `type`, `target`, `direction` and `status` |
+| `diagnosis_made` | a failure was explained; carries `classification`, `layer`, `rule` and the number of `evidence` items |
+| `action_authorized` | an authorized action is about to run; carries `action`, `target`, `from` and `reason` |
+| `verification_passed`, `verification_failed` | the path after recovery was measured |
+| `configuration validated`, `state reconciled` | a document was validated, a reclaim finished |
+| `experiment run succeeded`, `experiment run failed` | the run's terminal record; the failing one carries `state` |
+
+So one run's records account for the whole of it:
+
+```console
+$ netforge --log-level=debug --log-format=json experiment run … 2>trace.log
+$ jq -r .event trace.log
+dispatch
+namespace_created
+namespace_created
+namespace_created
+stage_setup
+stage_baseline
+fault_applied
+stage_fault
+stage_observe
+diagnosis_made
+stage_diagnose
+action_authorized
+fault_removed
+stage_recover
+verification_passed
+stage_verify
+stage_report
+stage_cleanup
+experiment run succeeded
+```
+
 ### A run, end to end
 
 ```console
@@ -131,6 +178,43 @@ every forwarded byte was NetForge's, which is the one thing a reader cannot
 otherwise tell from outside the process. It is recorded while the laboratory
 exists and printed after it is taken apart, because that is the only order in
 which both halves are available.
+
+### What to type next
+
+The `recommendation` block is the one part of a report that says what the
+diagnosis suggests. Both formats carry it, and it is present whether or not
+anything was diagnosed:
+
+```text
+recommendation:
+  diagnosed: true
+  remove_fault on nf-client0-demo; PROBABLE: the path to the target is impaired
+  rather than broken. measured loss of 75.0% on the path to the target (evidence
+  1).; rule degraded-path
+  next:      -recover remove_fault:nf-client0-demo
+  from:      nf-client0-demo
+```
+
+`next` is a complete `-recover` argument; a repair still needs the `-authorize`
+and the `-why` that every recovery requires.
+
+The suggestion is derived from the layer the diagnosis blamed, not from a list
+of faults: a `network` layer diagnosis names the namespace the probe measured
+from, because that is the only endpoint the evidence carries. Compare it with
+the `faults` block before following it — the fault a document declared may be on
+a different namespace than the one named here.
+
+A run that diagnosed nothing says so rather than leaving the block out, so an
+absent diagnosis and a report that forgot to look cannot be confused:
+
+```text
+recommendation:
+  diagnosed: false
+  nothing was diagnosed, so there is nothing to recommend
+```
+
+With `--output json` the same block is the `recommendation` object, and `flag`
+holds the string `next` renders.
 
 ### Serving the endpoint a protocol needs
 
@@ -316,6 +400,12 @@ The state root defaults to the system temporary directory, or to
 `$NETFORGE_STATE_ROOT` when that is set. `--state-root` overrides both, which is
 how you point a reconcile at a directory of your own.
 
+One listing reads at most 1024 entries. The state root is shared with everything
+else on the host, so a root that holds more than that is refused rather than
+enumerated — a million strangers' files are not NetForge's problem to walk. The
+refusal names the bound; move or clean the root, or point `--state-root` at a
+directory of your own.
+
 Reconciliation removes files and nothing else: no namespace, no link, no route and
 no qdisc rule, which is why it needs no privileges and cannot damage host
 networking. There is still no command that creates, inspects or destroys a
@@ -378,7 +468,7 @@ is not refused at the moment it would take effect.
 | --- | --- |
 | `build-and-test` | `go mod verify`, `gofmt -l`, `make build`, `go vet`, the whole suite, the whole suite under `-race`, coverage |
 | `integration` | `tests/integration` and `tests/security`, and fails if the suite ran as root, because its unprivileged claims are only evidence if it ran unprivileged |
-| `fuzz` | the four configuration fuzzers for 30s each |
+| `fuzz` | the five configuration fuzzers for 30s each |
 | `fuzz-packet` | the recorded packet corpus replayed, then eight packet and checksum fuzzers, and fails if a fuzzer wrote a new corpus entry that was not committed |
 | `static-analysis` | `go vet`, dependency review at moderate severity, `govulncheck` |
 

@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/investigator"
-	"github.com/netforge/netforge/internal/probe"
-	"github.com/netforge/netforge/internal/service"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/investigator"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/service"
 )
 
 const (
@@ -80,6 +80,8 @@ func ServiceFor(namespace string, protocol probe.Protocol, port uint16) (Service
 		spec.TLSPort = port
 	case probe.ProtocolHTTP:
 		spec.HTTPPort = port
+	case probe.ProtocolRUDP:
+		spec.RUDPPort = port
 	default:
 		return ServiceSpec{}, apperr.Unsupported(op,
 			"protocol "+strconv.Quote(string(protocol))+" has no endpoint NetForge serves", nil)

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 func fakeScope() Scope {
@@ -570,6 +570,7 @@ func TestEveryProtocolNamesALayer(t *testing.T) {
 		ProtocolDNS:  "dns",
 		ProtocolTLS:  "tls",
 		ProtocolHTTP: "http",
+		ProtocolRUDP: "transport",
 	}
 	for _, protocol := range Protocols() {
 		if got := protocol.Layer(); got != want[protocol] {

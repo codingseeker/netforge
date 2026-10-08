@@ -75,7 +75,7 @@ name and CIDR validation; no side effects in the parser. Evidence:
 `TestParseDoesNotAllocateUnboundedMemory`.
 
 Residual risk: a document that is valid and within all limits is still
-accepted. Phase 2 now checks that the scope actually covers what an experiment
+accepted. The planner checks that the scope actually covers what an experiment
 creates: every planned address must lie inside `scope.network` and every planned
 namespace must be named in `scope.namespaces`, both before any kernel call.
 
@@ -142,8 +142,10 @@ Secrets or sensitive values are written to logs or reports.
 Mitigations in place: the configuration model cannot carry a credential, and a
 test fails if a sensitive field name appears in that package. Logs carry
 `timestamp`, `level`, `component`, `event` and, where applicable,
-`experiment_id`, plus the specific measurement fields. Phase 11 will define the
-report schema and the redaction rules for it.
+`experiment_id`, plus the specific measurement fields. The report schema is
+fixed and declared in `internal/report`; fields that do not apply are omitted
+rather than emitted empty, so a report carries only what was measured. Evidence:
+`TestSecretsAreNotConfigurable`, `TestAnExperimentRunNeverLogsASecret`.
 
 ### T7 Uncontrolled concurrency
 
@@ -234,10 +236,10 @@ Evidence: `TestFaultsAreScopedToTheLaboratory`,
 `TestALaboratoryRefusesAnImpossibleFaultSet`,
 `TestTheLaboratoryTakesItsFaultsWithIt`.
 
-Still open: Phase 5 load generation has to bound concurrency and response size
-before it runs, and Phase 7 owns the queue and socket buffer bounds. A fault
-inside its bounds can still starve its own laboratory, which is the point of
-the phase, and the laboratory is torn down as a unit.
+Still open: load generation has to bound concurrency and response size before
+it runs, and the queue and socket buffer bounds are not owned by NetForge. A
+fault inside its bounds can still starve its own laboratory, which is the point
+of the fault, and the laboratory is torn down as a unit.
 
 ### T11 Uncontrolled packet generation
 
@@ -248,8 +250,8 @@ allowlist, checks the input length before reading a field, and refuses an
 allocation whose bound comes from the input. A malformed message that satisfies
 the wire format is still returned to the caller with its problems, so a later
 layer can inspect it, and it is never silently accepted as valid. Evidence:
-`tests/security/packet_test.go`, `TestEveryParserChecksItsInputLengthFirst`,
-`TestEveryAllocationIsBoundedBeforeItHappens`, the seven fuzz targets, and
+`tests/security/packet_test.go`, `TestParserChecksInputLength`,
+`TestEveryAllocationIsBoundedBeforeItHappens`, the packet and router fuzz targets, and
 mutation checks that confirm each invariant fails when the guard is removed.
 
 Residual risk: the packet layer is a codec. It does not emit.
@@ -351,6 +353,6 @@ resolved, and a report may say UNKNOWN where an operator wanted a number.
 | T7 | `go test -race ./...` | implemented |
 | T8 | holder-per-namespace lifetime tests, `TestTheReconcilerRemovesNothingItCannotProveOwns`, `TestAKilledRunLeavesIdentifiableState`, `TestAReconcileRefusesStateThatIsStillInUse` | implemented |
 | T9 | `TestGate2TrafficCrossesTheRouter`, `TestInterfacesAreInspected` | implemented |
-| T10 | scope, rate and concurrency tests | Phase 4 and Phase 5 |
+| T10 | scope, rate and concurrency tests | partial: scope is enforced, rate and concurrency are not |
 | T11 | `make fuzz-packet`, `tests/security/packet_test.go` | implemented |
 | T12 | `TestScopeIsEnforced`, `TestEnforceScopeNeedsEveryNamespace` | implemented |

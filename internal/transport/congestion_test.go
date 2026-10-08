@@ -160,7 +160,9 @@ func TestARepeatedTimeoutDuringRecoveryDoesNotCutAgain(t *testing.T) {
 	if c.window >= 16 {
 		t.Errorf("window = %d after a new loss, want below the window before it", c.window)
 	}
-	_ = cut
+	if c.window >= cut {
+		t.Errorf("window = %d after the second loss, want it cut from %d", c.window, cut)
+	}
 }
 
 func TestAnAcknowledgementCannotMoveTheControllerBackwards(t *testing.T) {

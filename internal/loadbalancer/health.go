@@ -2,13 +2,14 @@ package loadbalancer
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
-	"github.com/netforge/netforge/internal/transport"
+	"github.com/codingseeker/netforge/internal/transport"
 )
 
-var healthProbe = []byte("netforge.health.v1")
+var healthProbe = []byte(transport.HealthChallenge)
 
 func (b *Balancer) watchHealth(ctx context.Context) {
 	ticker := time.NewTicker(b.limits.HealthInterval)
@@ -62,8 +63,13 @@ func (b *Balancer) check(ctx context.Context, entry *backend) (error, time.Durat
 	if _, err := conn.Write(attempt, healthProbe); err != nil {
 		return err, time.Since(started)
 	}
-	if _, err := conn.Read(attempt); err != nil {
+	answer, err := conn.Read(attempt)
+	if err != nil {
 		return err, time.Since(started)
+	}
+	if !transport.IsHealthResponse(answer) {
+		return fmt.Errorf("the backend answered %d bytes that are not a %q response, so it identified itself as nothing",
+			len(answer), transport.HealthChallenge), time.Since(started)
 	}
 	return nil, time.Since(started)
 }

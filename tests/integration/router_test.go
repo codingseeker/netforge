@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/network"
-	"github.com/netforge/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/network"
+	"github.com/codingseeker/netforge/internal/probe"
 )
 
 func softLab(t *testing.T, id string) *network.Lab {

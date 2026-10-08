@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/config"
-	"github.com/netforge/netforge/internal/logging"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/config"
+	"github.com/codingseeker/netforge/internal/logging"
 )
 
 type fileOptions struct {
@@ -153,7 +153,7 @@ func configValidate() *Command {
 				return err
 			}
 
-			session.Logger.Info("configuration validated",
+			session.Logger.Info(logging.EventConfigurationValidated,
 				slog.String(logging.FieldExperimentID, cfg.ExperimentID()),
 				slog.String("configuration", cfg.Name),
 				slog.String("scope_network", cfg.Network()),

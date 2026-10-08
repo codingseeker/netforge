@@ -4,11 +4,12 @@ import (
 	"context"
 	"os"
 
-	"github.com/netforge/netforge/internal/cli"
-	"github.com/netforge/netforge/internal/namespace"
-	"github.com/netforge/netforge/internal/probe"
-	"github.com/netforge/netforge/internal/router"
-	"github.com/netforge/netforge/internal/service"
+	"github.com/codingseeker/netforge/internal/cli"
+	"github.com/codingseeker/netforge/internal/loadbalancer"
+	"github.com/codingseeker/netforge/internal/namespace"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/router"
+	"github.com/codingseeker/netforge/internal/service"
 )
 
 var (
@@ -27,6 +28,9 @@ func main() {
 		os.Exit(code)
 	}
 	if handled, code := probe.Dispatch(os.Args[1:]); handled {
+		os.Exit(code)
+	}
+	if handled, code := loadbalancer.Dispatch(os.Args[1:]); handled {
 		os.Exit(code)
 	}
 	os.Exit(run(context.Background(), os.Args[1:]))

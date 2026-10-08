@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -13,7 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/namespace"
+	"github.com/codingseeker/netforge/internal/logging"
+	"github.com/codingseeker/netforge/internal/namespace"
 )
 
 const (
@@ -46,9 +46,11 @@ func phase12Document(t *testing.T, name string) string {
 		"    value: 90%\n"
 }
 
-func aLongRun(t *testing.T, document string) (command *exec.Cmd, out, errOut *bytes.Buffer) {
+func aLongRun(t *testing.T, document string) (command *exec.Cmd, errOut *syncBuffer) {
 	t.Helper()
 	command = exec.Command(binaryPath,
+		"--log-level=debug",
+		"--log-format=json",
 		"experiment", "run",
 		"--id", phase12LabID,
 		"--namespace", phase12Client,
@@ -61,12 +63,10 @@ func aLongRun(t *testing.T, document string) (command *exec.Cmd, out, errOut *by
 		"--output", "json",
 		document)
 	command.Stdin = strings.NewReader("")
-	out = new(bytes.Buffer)
-	errOut = new(bytes.Buffer)
-	command.Stdout = out
+	errOut = new(syncBuffer)
 	command.Stderr = errOut
 	command.Env = append(os.Environ(), namespace.AgentEnv+"=")
-	return command, out, errOut
+	return command, errOut
 }
 
 func aQuickRun(t *testing.T, document string) runResult {
@@ -107,12 +107,13 @@ func hostLeaks() (leaks []string) {
 	return leaks
 }
 
-func interruptExperiment(t *testing.T, command *exec.Cmd, delay time.Duration, signal syscall.Signal) (exitCode int, stdout, stderr string) {
+func interruptExperiment(t *testing.T, command *exec.Cmd, errOut *syncBuffer,
+	until string, signal syscall.Signal) (exitCode int) {
 	t.Helper()
 	if err := command.Start(); err != nil {
 		t.Fatalf("start the interrupted run: %v", err)
 	}
-	time.Sleep(delay)
+	awaitRecord(t, errOut, until)
 	if err := command.Process.Signal(signal); err != nil {
 		_ = command.Wait()
 		t.Fatalf("the run finished before the %s could land: %v", signal, err)
@@ -124,13 +125,7 @@ func interruptExperiment(t *testing.T, command *exec.Cmd, delay time.Duration, s
 			exitCode = exit.ExitCode()
 		}
 	}
-	if out, ok := command.Stdout.(*bytes.Buffer); ok {
-		stdout = out.String()
-	}
-	if errOut, ok := command.Stderr.(*bytes.Buffer); ok {
-		stderr = errOut.String()
-	}
-	return exitCode, stdout, stderr
+	return exitCode
 }
 
 func labProcesses() []string {
@@ -208,12 +203,12 @@ func assertHostCameBack(t *testing.T, label string, before hostSnapshot) {
 func TestSIGINTInEveryPhaseLeavesTheLaboratoryClean(t *testing.T) {
 	offsets := []struct {
 		when  string
-		after time.Duration
+		until string
 	}{
-		{"setup", 150 * time.Millisecond},
-		{"fault injection", 600 * time.Millisecond},
-		{"recovery", 2500 * time.Millisecond},
-		{"verification", 3800 * time.Millisecond},
+		{"setup", logging.EventNamespace},
+		{"fault injection", logging.EventStageBaseline},
+		{"recovery", logging.EventStageObserve},
+		{"verification", logging.EventStageRecover},
 	}
 	document := writeFile(t, "phase12-sigint.yaml", phase12Document(t, "phase12-sigint"))
 	beforeProcesses := labProcesses()
@@ -225,13 +220,14 @@ func TestSIGINTInEveryPhaseLeavesTheLaboratoryClean(t *testing.T) {
 			t.Skipf("%s: the host network state is not readable: %v", label, err)
 		}
 
-		command, stdout, stderr := aLongRun(t, document)
-		exitCode, _, _ := interruptExperiment(t, command, setting.after, syscall.SIGINT)
+		command, errOut := aLongRun(t, document)
+		exitCode := interruptExperiment(t, command, errOut, setting.until, syscall.SIGINT)
 		if exitCode == 0 {
 			t.Errorf("%s: the run completed cleanly instead of being interrupted", label)
 		}
-		_ = stdout
-		_ = stderr
+		if records := eventsNamed(decodeRecords(t, errOut.String()), setting.until); len(records) == 0 {
+			t.Errorf("%s: the run never reached the stage the signal was aimed at", label)
+		}
 
 		again := aQuickRun(t, document)
 		if again.exitCode != 0 || !strings.Contains(again.stdout, `"succeeded": true`) {
@@ -251,16 +247,16 @@ func TestAKilledExperimentIsRecoveredByTheNextRun(t *testing.T) {
 	}
 	beforeProcesses := labProcesses()
 
-	for _, after := range []time.Duration{
-		400 * time.Millisecond,
-		1800 * time.Millisecond,
-		3200 * time.Millisecond,
+	for _, until := range []string{
+		logging.EventNamespace,
+		logging.EventStageBaseline,
+		logging.EventStageObserve,
 	} {
-		command, _, _ := aLongRun(t, document)
+		command, errOut := aLongRun(t, document)
 		if err := command.Start(); err != nil {
 			t.Fatalf("start the killed run: %v", err)
 		}
-		time.Sleep(after)
+		awaitRecord(t, errOut, until)
 		if err := command.Process.Kill(); err != nil {
 			_ = command.Wait()
 			t.Fatalf("the run finished before the kill could land: %v", err)
@@ -286,13 +282,13 @@ func TestRepeatedFailuresDoNotAccumulateState(t *testing.T) {
 	beforeProcesses := labProcesses()
 
 	for round := 0; round < 2; round++ {
-		command, _, _ := aLongRun(t, document)
-		interruptExperiment(t, command, 900*time.Millisecond, syscall.SIGINT)
-		command, _, _ = aLongRun(t, document)
+		command, errOut := aLongRun(t, document)
+		interruptExperiment(t, command, errOut, logging.EventStageBaseline, syscall.SIGINT)
+		command, errOut = aLongRun(t, document)
 		if err := command.Start(); err != nil {
 			t.Fatalf("start the killed run: %v", err)
 		}
-		time.Sleep(700 * time.Millisecond)
+		awaitRecord(t, errOut, logging.EventNamespace)
 		if err := command.Process.Kill(); err != nil {
 			_ = command.Wait()
 			t.Fatalf("the run finished before the kill could land: %v", err)

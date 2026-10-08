@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/apperr"
 )
 
 type Format string
@@ -112,6 +112,8 @@ func replaceAttr(groups []string, attr slog.Attr) slog.Attr {
 		return slog.String(FieldEvent, attr.Value.String())
 	case slog.LevelKey:
 		return slog.String("level", strings.ToLower(attr.Value.String()))
+	case FieldEvent:
+		return slog.Attr{}
 	default:
 		return attr
 	}

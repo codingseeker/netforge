@@ -26,9 +26,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/packet"
-	"github.com/netforge/netforge/internal/transport"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/packet"
+	"github.com/codingseeker/netforge/internal/transport"
 )
 
 const serviceMode = "netforge-service"
@@ -264,9 +264,13 @@ func (s *Service) listenUDP(name string, port uint16, handle func([]byte, net.Ad
 
 func (s *Service) listenReliable(port uint16) error {
 	const op = "service.listenReliable"
+	payload := s.config.MaxRequest
+	if ceiling := int(transport.MaxPayloadSize); payload > ceiling {
+		payload = ceiling
+	}
 	limits := transport.Limits{
 		MaxConnections: s.config.MaxConnections,
-		MaxPayload:     s.config.MaxRequest,
+		MaxPayload:     payload,
 		MaxWindow:      transport.DefaultLimits().MaxWindow,
 		IdleTimeout:    s.config.Timeout,
 	}
@@ -338,7 +342,7 @@ func (s *Service) serveEchoReliable(conn *transport.Conn) {
 			cancel()
 			return
 		}
-		_, err = conn.Write(ctx, payload)
+		_, err = conn.Write(ctx, transport.HealthAnswer(payload))
 		cancel()
 		if err != nil {
 			return
@@ -551,15 +555,12 @@ func (l *boundedListener) Accept() (net.Conn, error) {
 
 type slotConn struct {
 	net.Conn
-	slots    chan struct{}
-	released bool
+	slots chan struct{}
+	once  sync.Once
 }
 
 func (c *slotConn) Close() error {
-	if !c.released {
-		c.released = true
-		<-c.slots
-	}
+	c.once.Do(func() { <-c.slots })
 	return c.Conn.Close()
 }
 

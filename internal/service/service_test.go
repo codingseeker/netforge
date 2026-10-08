@@ -11,10 +11,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/packet"
+	"github.com/codingseeker/netforge/internal/packet"
 )
 
 func testConfig(t *testing.T, mutate func(*Config)) Config {
@@ -322,4 +323,68 @@ func TestCloseIsSafeToCallTwice(t *testing.T) {
 	if err := instance.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		t.Errorf("the second Close() = %v, want nil or a closed error", err)
 	}
+}
+
+func TestAConnectionIsReleasedOnceHoweverOftenItIsClosed(t *testing.T) {
+	t.Parallel()
+
+	t.Run("closing twice in a row", func(t *testing.T) {
+		t.Parallel()
+		slots := make(chan struct{}, 1)
+		slots <- struct{}{}
+
+		first, second := net.Pipe()
+		defer func() { _ = second.Close() }()
+		held := &slotConn{Conn: first, slots: slots}
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_ = held.Close()
+			_ = held.Close()
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("the second Close() blocked, so it took a permit that was already given back")
+		}
+		if got := len(slots); got != 0 {
+			t.Errorf("the permit channel holds %d permits after one connection was closed twice, want none", got)
+		}
+	})
+
+	t.Run("closing from every goroutine at once", func(t *testing.T) {
+		t.Parallel()
+		slots := make(chan struct{}, 1)
+		slots <- struct{}{}
+
+		first, second := net.Pipe()
+		defer func() { _ = second.Close() }()
+		held := &slotConn{Conn: first, slots: slots}
+
+		const closers = 8
+		var group sync.WaitGroup
+		group.Add(closers)
+		for range closers {
+			go func() {
+				defer group.Done()
+				_ = held.Close()
+			}()
+		}
+
+		released := make(chan struct{})
+		go func() {
+			group.Wait()
+			close(released)
+		}()
+		select {
+		case <-released:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%d concurrent closes did not finish, so one of them took a permit twice", closers)
+		}
+		if got := len(slots); got != 0 {
+			t.Errorf("the permit channel holds %d permits after one connection was closed %d times, want none",
+				got, closers)
+		}
+	})
 }

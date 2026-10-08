@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/iface"
-	"github.com/netforge/netforge/internal/namespace"
-	"github.com/netforge/netforge/internal/network"
+	"github.com/codingseeker/netforge/internal/iface"
+	"github.com/codingseeker/netforge/internal/namespace"
+	"github.com/codingseeker/netforge/internal/network"
 )
 
 func labSpec(id string) network.Spec {

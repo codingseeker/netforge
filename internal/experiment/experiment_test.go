@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/netforge/netforge/internal/apperr"
-	"github.com/netforge/netforge/internal/chaos"
-	"github.com/netforge/netforge/internal/config"
-	"github.com/netforge/netforge/internal/investigator"
-	"github.com/netforge/netforge/internal/probe"
-	"github.com/netforge/netforge/internal/recovery"
+	"github.com/codingseeker/netforge/internal/apperr"
+	"github.com/codingseeker/netforge/internal/chaos"
+	"github.com/codingseeker/netforge/internal/config"
+	"github.com/codingseeker/netforge/internal/investigator"
+	"github.com/codingseeker/netforge/internal/probe"
+	"github.com/codingseeker/netforge/internal/recovery"
 )
 
 const (
@@ -269,7 +269,6 @@ func TestAFailedStepStillCleansUp(t *testing.T) {
 		t.Run(state.String(), func(t *testing.T) {
 
 			env := &fakeEnvironment{fail: state}
-			_ = state
 			plan, err := compile(t, testDocument(t), testObservation(), []recovery.Request{{
 				Action:  recovery.ActionRemoveFault,
 				Target:  serviceB,
@@ -572,7 +571,7 @@ func TestOnlyAuthorizedActionsArePerformed(t *testing.T) {
 	}
 }
 
-func AnAuthorizedActionThatDidNotRecoverFailsTheExperiment(t *testing.T) {
+func TestAnAuthorizedActionThatDidNotRecoverFailsTheExperiment(t *testing.T) {
 	plan, err := compile(t, testDocument(t), testObservation(), []recovery.Request{{
 		Action:  recovery.ActionRemoveFault,
 		Target:  serviceB,
